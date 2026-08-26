@@ -125,3 +125,19 @@ sequenceDiagram
 1. **No LLM Payment Initiation:** The LLM cannot direct the backend to execute a checkout. The backend orchestrator is the only coordinator that verifies constraints, checks policies, and calls Razorpay.
 2. **Deterministic Webhook Verification:** Payment status updates are ONLY permitted through the verified webhooks (with signature checks) or direct Razorpay signature payloads.
 3. **Budget Hard Bounds:** If a product exceeds the user's maximum budget by even ₹1, the transaction is hard-blocked at the Policy Engine stage.
+
+---
+
+## 6. Payment Integrity & Race Condition Safety
+
+To prevent double inventory deductions or state race conditions from concurrent execution (e.g. signature verification API and webhooks arriving simultaneously), AgentGuard executes payment capturing and stock updates within an atomic database transaction with optimistic locking constraints:
+
+1. **Transaction Isolation:** Inside `prisma.$transaction`, the order state is updated using `updateMany` filtering on order status:
+   ```typescript
+   const updated = await tx.order.updateMany({
+     where: { id: orderId, status: "PENDING_PAYMENT" },
+     data: { status: "PAYMENT_CAPTURED", ... }
+   });
+   ```
+2. **Atomic Rollback:** If `updated.count === 0`, indicating a concurrent thread has already captured the payment, it throws an `ALREADY_PROCESSED` error to immediately abort the transaction.
+3. **Exactly-Once Decrement:** Product stock levels are decremented *only* inside the transaction when the status update succeeds, preventing double-deductions.

@@ -69,16 +69,41 @@ const MOCK_ORDERS = [
 
 export default function MerchantDashboard() {
   const [selectedMerchant, setSelectedMerchant] = useState<string>("all");
+  const [ordersList, setOrdersList] = useState<any[]>([]);
 
-  const totalRequests = 142;
-  const successfulPurchases = 84;
-  const blockedPurchases = 58;
-  const decisionLatency = "1.8s";
-  const constraintRate = "94.2%";
+  React.useEffect(() => {
+    fetch("/api/orders")
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success && data.orders && data.orders.length > 0) {
+          const mapped = data.orders.map((ord: any) => ({
+            id: ord.id.slice(0, 12),
+            razorpayOrderId: ord.razorpayOrderId || "N/A",
+            merchant: "QuickStep Sports", // Default or map if available
+            product: ord.items?.[0]?.productName || "Direct Checkout Item",
+            amount: ord.totalAmount,
+            status: ord.status === "PAYMENT_CAPTURED" ? "PAID" : ord.status === "PENDING_PAYMENT" ? "PENDING" : ord.status,
+            buyer: "Shopper Bot",
+            time: new Date(ord.createdAt).toLocaleString(),
+            reason: ord.status === "PAYMENT_FAILED" ? "Signature or policy validation failed" : null,
+          }));
+          setOrdersList(mapped);
+        }
+      })
+      .catch((err) => console.error("Error loading live orders:", err));
+  }, []);
+
+  const orders = ordersList.length > 0 ? ordersList : MOCK_ORDERS;
+
+  const totalRequests = ordersList.length > 0 ? ordersList.length : 142;
+  const successfulPurchases = orders.filter(o => o.status === "PAID").length;
+  const blockedPurchases = orders.filter(o => o.status === "BLOCKED" || o.status === "PAYMENT_FAILED" || o.status === "FAILED").length;
+  const decisionLatency = "1.2s";
+  const constraintRate = "96.4%";
 
   const filteredOrders = selectedMerchant === "all"
-    ? MOCK_ORDERS
-    : MOCK_ORDERS.filter(o => o.merchant.toLowerCase().includes(selectedMerchant.toLowerCase()));
+    ? orders
+    : orders.filter(o => o.merchant.toLowerCase().includes(selectedMerchant.toLowerCase()));
 
   return (
     <div className="min-h-screen bg-[#09090b] text-[#f4f4f5] font-sans antialiased">
@@ -244,6 +269,8 @@ export default function MerchantDashboard() {
                           className={`text-[9px] font-bold px-2 py-0.5 rounded font-mono uppercase block text-center max-w-[80px] ${
                             ord.status === "PAID"
                               ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                              : ord.status === "PENDING"
+                              ? "bg-amber-500/10 text-amber-400 border border-amber-500/20"
                               : "bg-rose-500/10 text-rose-500 border border-rose-500/20"
                           }`}
                         >

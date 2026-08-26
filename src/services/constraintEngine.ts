@@ -24,28 +24,32 @@ export class ConstraintEngine {
     intent: BuyerIntent
   ): { exactMatches: ProductData[] } {
     const exactMatches = products.filter((p) => {
-      // Hard Category check
+      // 1. Hard Category check
       if (intent.category.value && p.category.toLowerCase() !== intent.category.value.toLowerCase()) {
-        return false;
+        if (intent.category.strength !== "soft") return false;
       }
-      // Hard Size check
+      // 2. Hard Size check (hard by default)
       if (intent.size.value !== null && !p.sizes.includes(intent.size.value)) {
-        return false;
+        if (intent.size.strength !== "soft") return false;
       }
-      // Hard Budget check
+      // 3. Hard Budget check (hard by default)
       if (intent.maxBudget.value !== null && p.price > intent.maxBudget.value) {
-        return false;
+        if (intent.maxBudget.strength !== "soft") return false;
       }
-      // Soft Color check
+      // 4. Soft Color check (soft by default, unless explicitly hard)
       if (intent.color.value !== null && p.color.toLowerCase() !== intent.color.value.toLowerCase()) {
-        return false;
+        if (intent.color.strength === "hard") return false;
       }
-      // Soft Purpose check
+      // 5. Soft Brand preference (soft by default)
+      if (intent.brand.value !== null && p.merchantName.toLowerCase() !== intent.brand.value.toLowerCase()) {
+        if (intent.brand.strength === "hard") return false;
+      }
+      // 6. Soft Purpose check (soft by default)
       if (intent.purpose.value && intent.purpose.value.length > 0) {
         const hasMatchingPurpose = intent.purpose.value.some((purp) =>
           p.purpose.map((pr) => pr.toLowerCase()).includes(purp.toLowerCase())
         );
-        if (!hasMatchingPurpose) {
+        if (!hasMatchingPurpose && intent.purpose.strength === "hard") {
           return false;
         }
       }

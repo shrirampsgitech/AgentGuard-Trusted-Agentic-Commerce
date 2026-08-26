@@ -213,7 +213,25 @@ Checks current stock levels and checks size eligibility.
 
 ---
 
-## 4. Policy Management
+## 4. Policy Management & System Orders
+
+### `GET /api/policy`
+Retrieves the active global User Policy settings (max budget, category list, merchant list, payment methods, and autonomy level).
+
+**Response:**
+```json
+{
+  "success": true,
+  "policy": {
+    "id": "default-policy",
+    "maxBudget": 2000,
+    "allowedCategories": ["shoes", "clothing"],
+    "allowedMerchants": ["QuickStep Sports", "UrbanStride"],
+    "allowedPaymentMethods": ["UPI"],
+    "autonomyLevel": 2
+  }
+}
+```
 
 ### `POST /api/policy`
 Update the deterministic buyer security policy.
@@ -222,8 +240,9 @@ Update the deterministic buyer security policy.
 ```json
 {
   "maxBudget": 2500,
-  "allowedCategory": "shoes",
-  "allowedPaymentMethod": "UPI",
+  "allowedCategories": ["shoes", "clothing"],
+  "allowedMerchants": ["QuickStep Sports", "UrbanStride", "SportKart"],
+  "allowedPaymentMethods": ["UPI", "Card"],
   "autonomyLevel": 3
 }
 ```
@@ -235,10 +254,42 @@ Update the deterministic buyer security policy.
   "policy": {
     "id": "default-policy",
     "maxBudget": 2500,
-    "allowedCategory": "shoes",
-    "allowedPaymentMethod": "UPI",
+    "allowedCategories": ["shoes", "clothing"],
+    "allowedMerchants": ["QuickStep Sports", "UrbanStride", "SportKart"],
+    "allowedPaymentMethods": ["UPI", "Card"],
     "autonomyLevel": 3
   }
+}
+```
+
+---
+
+### `GET /api/orders`
+Retrieves a list of all historical database transaction order records.
+
+**Response:**
+```json
+{
+  "success": true,
+  "orders": [
+    {
+      "id": "clt123abc000008ld",
+      "razorpayOrderId": "order_mock_7a6d8s9",
+      "razorpayPaymentId": "pay_mock_9a8s7d6",
+      "status": "PAYMENT_CAPTURED",
+      "totalAmount": 1899,
+      "createdAt": "2026-08-26T14:15:00.000Z",
+      "items": [
+        {
+          "id": "item-01",
+          "productId": "prod-101",
+          "productName": "SwiftRun Blue Trainer",
+          "price": 1899,
+          "quantity": 1
+        }
+      ]
+    }
+  ]
 }
 ```
 

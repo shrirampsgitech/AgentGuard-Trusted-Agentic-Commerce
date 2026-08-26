@@ -142,8 +142,10 @@ export default function AgentGuardHome() {
   
   // Policy values editable on frontend
   const [policyLimit, setPolicyLimit] = useState(2000);
-  const [policyCategory, setPolicyCategory] = useState("shoes");
   const [policyAutonomy, setPolicyAutonomy] = useState(2); // 1 = Recommend, 2 = Prepare, 3 = Autonomous
+  const [allowedCategories, setAllowedCategories] = useState<string[]>(["shoes", "clothing"]);
+  const [allowedMerchants, setAllowedMerchants] = useState<string[]>(["QuickStep Sports", "UrbanStride"]);
+  const [allowedPaymentMethods, setAllowedPaymentMethods] = useState<string[]>(["UPI"]);
   
   // Dashboard states
   const [totalRequests, setTotalRequests] = useState(142);
@@ -157,6 +159,55 @@ export default function AgentGuardHome() {
   const [paymentStep, setPaymentStep] = useState<"none" | "paying" | "verifying" | "captured" | "failed">("none");
 
   const chatEndRef = useRef<HTMLDivElement>(null);
+
+  // Persistence helper for policy adjustments
+  const savePolicyToBackend = async (
+    limit: number,
+    autonomy: number,
+    categories: string[],
+    merchants: string[],
+    payments: string[]
+  ) => {
+    try {
+      await fetch("/api/policy", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          maxBudget: limit,
+          autonomyLevel: autonomy,
+          allowedCategories: categories,
+          allowedMerchants: merchants,
+          allowedPaymentMethods: payments,
+        }),
+      });
+    } catch (error) {
+      console.error("Failed to save policy to backend:", error);
+    }
+  };
+
+  const handleCategoryToggle = (category: string) => {
+    const updated = allowedCategories.includes(category)
+      ? allowedCategories.filter(c => c !== category)
+      : [...allowedCategories, category];
+    setAllowedCategories(updated);
+    savePolicyToBackend(policyLimit, policyAutonomy, updated, allowedMerchants, allowedPaymentMethods);
+  };
+
+  const handleMerchantToggle = (merchant: string) => {
+    const updated = allowedMerchants.includes(merchant)
+      ? allowedMerchants.filter(m => m !== merchant)
+      : [...allowedMerchants, merchant];
+    setAllowedMerchants(updated);
+    savePolicyToBackend(policyLimit, policyAutonomy, allowedCategories, updated, allowedPaymentMethods);
+  };
+
+  const handlePaymentToggle = (payment: string) => {
+    const updated = allowedPaymentMethods.includes(payment)
+      ? allowedPaymentMethods.filter(p => p !== payment)
+      : [...allowedPaymentMethods, payment];
+    setAllowedPaymentMethods(updated);
+    savePolicyToBackend(policyLimit, policyAutonomy, allowedCategories, allowedMerchants, updated);
+  };
 
   // Initialize with system message & health checks
   useEffect(() => {
@@ -186,6 +237,20 @@ export default function AgentGuardHome() {
         console.warn("Could not reach health check API, running in client-sandbox mode.", err);
         setApiHealth({ status: "healthy", database: "connected (mock)", mockMode: { gemini: true, razorpay: true } });
       });
+
+    // Load initial active policy settings
+    fetch("/api/policy")
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success && data.policy) {
+          setPolicyLimit(data.policy.maxBudget);
+          setPolicyAutonomy(data.policy.autonomyLevel);
+          setAllowedCategories(data.policy.allowedCategories || ["shoes", "clothing"]);
+          setAllowedMerchants(data.policy.allowedMerchants || ["QuickStep Sports", "UrbanStride"]);
+          setAllowedPaymentMethods(data.policy.allowedPaymentMethods || ["UPI"]);
+        }
+      })
+      .catch((err) => console.warn("Failed to fetch initial policy settings:", err));
 
     // Populate default audit logs
     setAuditLogs([
@@ -665,6 +730,49 @@ export default function AgentGuardHome() {
                           <div>Return: <span className="text-white font-medium">{msg.data.product.returnDays} Days</span></div>
                           <div>Stock: <span className="text-emerald-400 font-medium">In Stock ({msg.data.product.stock})</span></div>
                         </div>
+
+                        {/* Why I chose this block */}
+                        <div className="bg-[#09090b]/40 border border-[#27272a] rounded-xl p-3 mt-2 space-y-1.5 text-xs text-[#a1a1aa]">
+                          <p className="font-semibold text-white text-[10px] uppercase tracking-wider pb-1 border-b border-[#27272a]">Why I Recommend This</p>
+                          <div className="space-y-1 text-[10px]">
+                            <div className="flex items-center gap-1.5 text-emerald-400">
+                              <span>✓</span> <span>Matches size requirement ({msg.data.size})</span>
+                            </div>
+                            <div className="flex items-center gap-1.5 text-emerald-400">
+                              <span>✓</span> <span>Within maximum budget cap ({formatINR(policyLimit)})</span>
+                            </div>
+                            {sessionIntent?.color?.value && msg.data.product.color.toLowerCase() === sessionIntent.color.value.toLowerCase() && (
+                              <div className="flex items-center gap-1.5 text-emerald-400">
+                                <span>✓</span> <span>Matches color preference ({msg.data.product.color})</span>
+                              </div>
+                            )}
+                            <div className="flex items-center gap-1.5 text-emerald-400">
+                              <span>✓</span> <span>In stock at {msg.data.product.merchantName}</span>
+                            </div>
+                            <div className="flex items-center gap-1.5 text-[#71717a]">
+                              <span>✓</span> <span>Determined as the best match with rank score: {Math.round(1000 - msg.data.product.price / 10 + msg.data.product.rating * 30 - msg.data.product.shippingDays * 15)}</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Merchant comparison option cards */}
+                        {msg.data.products && msg.data.products.length > 1 && (
+                          <div className="bg-[#09090b]/40 border border-[#27272a]/60 rounded-xl p-3 mt-2 space-y-2 text-xs">
+                            <p className="font-semibold text-white text-[10px] uppercase tracking-wider pb-1 border-b border-[#27272a]">Merchant Options Compared</p>
+                            <div className="space-y-2">
+                              {msg.data.products.map((p: any, pidx: number) => (
+                                <div key={pidx} className={`p-2 rounded-lg border ${pidx === 0 ? "border-indigo-500/30 bg-indigo-500/5" : "border-[#27272a]"} flex justify-between items-center text-[10px]`}>
+                                  <div>
+                                    <p className="font-semibold text-white">{p.merchantName} {pidx === 0 && <span className="text-[8px] bg-indigo-500/20 text-indigo-400 px-1 py-0.5 rounded ml-1 font-mono uppercase font-bold">RECOMMENDED</span>}</p>
+                                    <p className="text-[#a1a1aa] mt-0.5">{p.shippingDays}d shipping | {p.rating}★ Rating</p>
+                                  </div>
+                                  <p className="font-bold text-white">{formatINR(p.price)}</p>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
                         {/* Purchase Safety Check list */}
                         {msg.data.policyResult && (
                           <div className="bg-[#09090b]/60 border border-[#27272a]/80 rounded-lg p-3 space-y-2 mt-2">
@@ -718,32 +826,59 @@ export default function AgentGuardHome() {
                     )}
 
                     {msg.type === "alternatives-card" && msg.data && (
-                      <div className="space-y-2 mt-2">
-                        {msg.data.alternatives.map((alt: any, idx: number) => (
-                          <div
-                            key={idx}
-                            className="bg-[#1e1e24] border border-[#27272a] hover:border-indigo-500/20 rounded-xl p-3 flex items-center justify-between text-xs transition-all"
-                          >
-                            <div>
-                              <p className="font-medium text-white">{alt.name}</p>
-                              <p className="text-[#a1a1aa] mt-0.5">
-                                Color: <span className="text-amber-400 capitalize">{alt.color}</span> | Size: {msg.data.originalPreferences.size}
-                              </p>
-                              <p className="text-[10px] text-[#71717a] mt-0.5">{alt.merchantName}</p>
+                      <div className="space-y-2.5 mt-2">
+                        <div className="bg-rose-500/5 border border-rose-500/20 rounded-xl p-3 text-xs text-[#a1a1aa] leading-relaxed">
+                          <p className="font-semibold text-rose-400 mb-1">⚠️ Exact Match Unavailable</p>
+                          <p className="text-[10px]">No products in stock match all constraints. Review the closest options below and select which criteria you would like to relax.</p>
+                        </div>
+                        {msg.data.alternatives.map((alt: any, idx: number) => {
+                          const isBudget = alt.violatedConstraint === "budget";
+                          const isSize = alt.violatedConstraint === "size";
+                          const isColor = alt.violatedConstraint === "color";
+                          
+                          let relaxationText = "Relax preference";
+                          let command = `Select option: ${alt.product.name}`;
+                          
+                          if (isBudget) {
+                            relaxationText = `Allow ₹${alt.difference} increase`;
+                            command = `budget can go up to ${alt.product.price}`;
+                          } else if (isSize) {
+                            relaxationText = `Allow size ${alt.product.sizes[0] || "flexible"}`;
+                            command = `size ${alt.product.sizes[0] || 9.5} is okay`;
+                          } else if (isColor) {
+                            relaxationText = "Color doesn't matter";
+                            command = "color doesn't matter";
+                          }
+
+                          return (
+                            <div
+                              key={idx}
+                              className="bg-[#1e1e24] border border-[#27272a] hover:border-indigo-500/20 rounded-xl p-3 flex flex-col gap-2 transition-all"
+                            >
+                              <div className="flex items-center justify-between text-xs">
+                                <div>
+                                  <p className="font-medium text-white">{alt.product.name}</p>
+                                  <p className="text-[10px] text-zinc-400 mt-0.5">
+                                    Merchant: {alt.product.merchantName} | Rating: {alt.product.rating}★
+                                  </p>
+                                </div>
+                                <p className="font-bold text-white">{formatINR(alt.product.price)}</p>
+                              </div>
+                              
+                              <div className="flex items-center justify-between border-t border-[#27272a] pt-2 mt-1">
+                                <span className="text-[10px] text-rose-400 font-medium">
+                                  {alt.explanation}
+                                </span>
+                                <button
+                                  onClick={() => handleSendMessage(command)}
+                                  className="bg-indigo-600 hover:bg-indigo-700 text-white px-2.5 py-1 rounded text-[9px] font-semibold transition-colors"
+                                >
+                                  {relaxationText}
+                                </button>
+                              </div>
                             </div>
-                            <div className="text-right shrink-0">
-                              <p className="font-bold text-white mb-1.5">{formatINR(alt.price)}</p>
-                              <button
-                                onClick={() => {
-                                  handleSendMessage(`Select option: ${alt.name}`);
-                                }}
-                                className="bg-indigo-600 hover:bg-indigo-700 text-white px-2.5 py-1 rounded text-[10px] font-semibold transition-colors"
-                              >
-                                Select Option
-                              </button>
-                            </div>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     )}
 
@@ -844,6 +979,7 @@ export default function AgentGuardHome() {
                         key={lvl}
                         onClick={() => {
                           setPolicyAutonomy(lvl);
+                          savePolicyToBackend(policyLimit, lvl, allowedCategories, allowedMerchants, allowedPaymentMethods);
                           const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
                           setAuditLogs((prev) => [
                             {
@@ -882,7 +1018,11 @@ export default function AgentGuardHome() {
                     max="5000"
                     step="100"
                     value={policyLimit}
-                    onChange={(e) => setPolicyLimit(parseInt(e.target.value))}
+                    onChange={(e) => {
+                      const val = parseInt(e.target.value);
+                      setPolicyLimit(val);
+                      savePolicyToBackend(val, policyAutonomy, allowedCategories, allowedMerchants, allowedPaymentMethods);
+                    }}
                     className="w-full h-1.5 bg-[#09090b] rounded-lg appearance-none cursor-pointer accent-indigo-500"
                   />
                   <div className="flex justify-between text-[10px] text-[#71717a]">
@@ -891,18 +1031,58 @@ export default function AgentGuardHome() {
                   </div>
                 </div>
 
-                {/* Approved Category */}
+                {/* Approved Category Checkboxes */}
                 <div className="space-y-1.5">
-                  <label className="text-[#a1a1aa] block font-medium">Whitelisted Category</label>
-                  <select
-                    value={policyCategory}
-                    onChange={(e) => setPolicyCategory(e.target.value)}
-                    className="w-full bg-[#09090b] border border-[#27272a] rounded-xl px-3 py-2 focus:outline-none focus:border-indigo-500 transition-colors"
-                  >
-                    <option value="shoes">Shoes Only</option>
-                    <option value="clothing">Clothing Only</option>
-                    <option value="accessories">Accessories Only</option>
-                  </select>
+                  <label className="text-[#a1a1aa] block font-medium">Whitelisted Categories</label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {["shoes", "clothing", "accessories"].map((cat) => (
+                      <label key={cat} className="flex items-center gap-1.5 cursor-pointer text-[#d4d4d8]">
+                        <input
+                          type="checkbox"
+                          checked={allowedCategories.includes(cat)}
+                          onChange={() => handleCategoryToggle(cat)}
+                          className="rounded border-[#27272a] bg-[#09090b] text-indigo-600 focus:ring-0 focus:ring-offset-0 cursor-pointer h-3.5 w-3.5"
+                        />
+                        <span className="capitalize text-[10px]">{cat}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Approved Merchants Checkboxes */}
+                <div className="space-y-1.5">
+                  <label className="text-[#a1a1aa] block font-medium">Whitelisted Merchants</label>
+                  <div className="grid grid-cols-1 gap-1.5">
+                    {["QuickStep Sports", "UrbanStride", "SportKart"].map((merch) => (
+                      <label key={merch} className="flex items-center gap-1.5 cursor-pointer text-[#d4d4d8]">
+                        <input
+                          type="checkbox"
+                          checked={allowedMerchants.includes(merch)}
+                          onChange={() => handleMerchantToggle(merch)}
+                          className="rounded border-[#27272a] bg-[#09090b] text-indigo-600 focus:ring-0 focus:ring-offset-0 cursor-pointer h-3.5 w-3.5"
+                        />
+                        <span className="text-[10px]">{merch}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Approved Payment Methods Checkboxes */}
+                <div className="space-y-1.5">
+                  <label className="text-[#a1a1aa] block font-medium">Allowed Payment Methods</label>
+                  <div className="flex gap-4">
+                    {["UPI", "Card", "NetBanking"].map((pay) => (
+                      <label key={pay} className="flex items-center gap-1.5 cursor-pointer text-[#d4d4d8]">
+                        <input
+                          type="checkbox"
+                          checked={allowedPaymentMethods.includes(pay)}
+                          onChange={() => handlePaymentToggle(pay)}
+                          className="rounded border-[#27272a] bg-[#09090b] text-indigo-600 focus:ring-0 focus:ring-offset-0 cursor-pointer h-3.5 w-3.5"
+                        />
+                        <span className="text-[10px]">{pay}</span>
+                      </label>
+                    ))}
+                  </div>
                 </div>
 
                 {/* Safety Rules check info */}
