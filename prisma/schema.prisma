@@ -1,0 +1,107 @@
+datasource db {
+  provider = "postgresql"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Merchant {
+  id          String    @id @default(uuid())
+  name        String
+  logoUrl     String?
+  description String?
+  rating      Float     @default(5.0)
+  active      Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  products    Product[]
+}
+
+model Product {
+  id           String      @id @default(uuid())
+  merchantId   String
+  name         String
+  category     String
+  purpose      String[]    // Array of purposes, e.g., ["running", "sports"]
+  color        String
+  sizes        Float[]     // Array of sizes, e.g., [8, 9, 10, 11]
+  price        Float
+  currency     String      @default("INR")
+  rating       Float       @default(0.0)
+  stock        Int         @default(0)
+  returnDays   Int         @default(30)
+  shippingDays Int         @default(3)
+  description  String?
+  active       Boolean     @default(true)
+  merchant     Merchant    @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  cartItems    CartItem[]
+  orderItems   OrderItem[]
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+}
+
+model UserPolicy {
+  id                    String   @id @default("default-policy")
+  maxBudget             Float    @default(2000.0)
+  allowedCategories     String[] // e.g., ["shoes", "clothing"]
+  allowedMerchants      String[] // e.g., ["QuickStep Sports", "UrbanStride"]
+  allowedPaymentMethods String[] // e.g., ["UPI"]
+  autonomyLevel         Int      @default(2) // 1 = Recommend, 2 = Prepare, 3 = Autonomous
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+}
+
+model Cart {
+  id        String     @id @default(uuid())
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  items     CartItem[]
+}
+
+model CartItem {
+  id        String   @id @default(uuid())
+  cartId    String
+  productId String
+  quantity  Int      @default(1)
+  size      Float
+  color     String
+  price     Float
+  cart      Cart     @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+}
+
+model Order {
+  id                 String      @id @default(uuid())
+  razorpayOrderId    String?     @unique
+  razorpayPaymentId  String?
+  razorpaySignature  String?
+  status             String      @default("PENDING") // PENDING, PAID, FAILED
+  totalAmount        Float
+  currency           String      @default("INR")
+  buyerName          String
+  shippingAddress    String
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
+  items              OrderItem[]
+}
+
+model OrderItem {
+  id        String   @id @default(uuid())
+  orderId   String
+  productId String
+  quantity  Int      @default(1)
+  size      Float
+  color     String
+  price     Float
+  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  sessionId String
+  timestamp DateTime @default(now())
+  step      String
+  message   String
+  details   Json?    // Stores detailed metadata/JSON payloads of the step
+}
