@@ -152,7 +152,9 @@ export default function AgentGuardHome() {
   
   // Active checkout state
   const [activeCheckoutProduct, setActiveCheckoutProduct] = useState<any>(null);
-  const [paymentStep, setPaymentStep] = useState<"none" | "paying" | "captured" | "failed">("none");
+  const [activeOrderId, setActiveOrderId] = useState<string>("");
+  const [activeRazorpayOrderId, setActiveRazorpayOrderId] = useState<string>("");
+  const [paymentStep, setPaymentStep] = useState<"none" | "paying" | "verifying" | "captured" | "failed">("none");
 
   const chatEndRef = useRef<HTMLDivElement>(null);
 
@@ -160,6 +162,12 @@ export default function AgentGuardHome() {
   useEffect(() => {
     // Generate unique sessionId on start
     setSessionId(`session_${Math.random().toString(36).substring(2, 12)}`);
+
+    // Dynamically inject Razorpay checkout script
+    const script = document.createElement("script");
+    script.src = "https://checkout.razorpay.com/v1/checkout.js";
+    script.async = true;
+    document.body.appendChild(script);
 
     setMessages([
       {
@@ -320,83 +328,196 @@ export default function AgentGuardHome() {
   };
 
   // Launch Razorpay Order trigger
-  const triggerPaymentOrder = (product: any, addAudit?: any, autonomous = false) => {
+  const triggerPaymentOrder = async (product: any, addAudit?: any, autonomous = false) => {
     const logger = addAudit || ((step: string, message: string, status: string) => {
       const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
       setAuditLogs((prev) => [{ step, message, status: status as any, time }, ...prev]);
     });
 
-    logger("PAYMENT_SERVICE", `Contacting Razorpay APIs to create Test Order for ${formatINR(product.price)}`, "info");
+    logger("PAYMENT_SERVICE", `Contacting checkout API to initiate safety validation and order creation...`, "info");
     setActiveCheckoutProduct(product);
     setPaymentStep("paying");
 
-    setTimeout(() => {
-      const mockRazorpayOrderId = `order_${Math.random().toString(36).substring(2, 12)}`;
-      logger("RAZORPAY_ORDER_CREATED", `Order generated successfully. ID: ${mockRazorpayOrderId}`, "success");
-      
-      if (autonomous) {
-        // Simulate immediate successful webhook capture for Level 3
-        logger("RAZORPAY_WEBHOOK_RECEIVED", "Received payment.captured webhook notification from Razorpay", "info");
-        logger("PAYMENT_CAPTURED", `Signature verified. Confirmed transaction of ${formatINR(product.price)}`, "success");
-        setPaymentStep("captured");
-        setSuccessPurchases(prev => prev + 1);
+    try {
+      const checkoutSize = sessionIntent?.size?.value || 10;
+      const checkoutOriginalPrice = sessionIntent?.originalPrice?.value !== undefined 
+        ? sessionIntent.originalPrice.value 
+        : product.price;
+      const checkoutAuthStatus = sessionIntent?.authorizationStatus?.value || "NONE";
 
+      const res = await fetch("/api/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId,
+          productId: product.id,
+          size: checkoutSize,
+          quantity: 1,
+          originalPrice: checkoutOriginalPrice,
+          authorizationStatus: checkoutAuthStatus,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        logger("CHECKOUT_BLOCKED", `Checkout blocked: ${data.error || "Safety rules violation"}`, "error");
+        setPaymentStep("failed");
+        setBlockedPurchases((prev) => prev + 1);
         setMessages((prev) => [
           ...prev,
           {
             sender: "agent",
-            text: `✅ Purchase completed successfully! Order ID ${mockRazorpayOrderId} has been paid and verified via Razorpay webhook. Stock inventory updated.`,
+            text: `❌ Checkout blocked: ${data.error || "Policy Engine rules violation."}`,
             timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
           }
         ]);
-        setIsProcessing(false);
+        return;
+      }
+
+      const { orderId, razorpayOrderId, amount, currency, keyId } = data;
+      setActiveOrderId(orderId);
+      setActiveRazorpayOrderId(razorpayOrderId);
+      logger("RAZORPAY_ORDER_CREATED", `Razorpay Order generated successfully. ID: ${razorpayOrderId}`, "success");
+
+      // Level 3 autonomous pre-authorization bypasses checkout window popup in tests
+      if (autonomous) {
+        logger("PAYMENT_AUTONOMOUS", "Autonomy Level 3: Auto-authorizing checkout payment", "info");
+        await verifyPaymentSignatureOnBackend(
+          orderId,
+          razorpayOrderId,
+          `pay_auto_${Math.random().toString(36).substring(2, 12)}`,
+          "valid_mock_signature"
+        );
+        return;
+      }
+
+      // For Level 2, try to open the official Razorpay Checkout widget
+      if (typeof window !== "undefined" && (window as any).Razorpay && keyId && keyId !== "rzp_test_placeholder") {
+        logger("PAYMENT_POPUP_OPEN", "Launching Razorpay secure payment checkout popup...", "info");
+        const options = {
+          key: keyId,
+          amount: amount,
+          currency: currency,
+          name: "AgentGuard Sandbox",
+          description: `Payment for ${product.name}`,
+          order_id: razorpayOrderId,
+          handler: async function (response: any) {
+            logger("PAYMENT_POPUP_SUCCESS", "Widget transaction complete. Forwarding to signature check...", "info");
+            await verifyPaymentSignatureOnBackend(
+              orderId,
+              razorpayOrderId,
+              response.razorpay_payment_id,
+              response.razorpay_signature
+            );
+          },
+          prefill: {
+            name: "Shopper",
+            email: "shopper@agentguard.ai",
+            contact: "9999999999",
+          },
+          theme: { color: "#4f46e5" },
+          modal: {
+            ondismiss: function () {
+              logger("PAYMENT_CANCELLED", "User closed the payment popup window.", "warning");
+              handleVerificationFailure("Payment cancelled by user.");
+            }
+          }
+        };
+        const rzp = new (window as any).Razorpay(options);
+        rzp.open();
       } else {
-        // For Level 2, leave Checkout modal open for user confirmation
+        logger("PAYMENT_SANDBOX_MOCK", "No credentials or script. Ready for manual mock action.", "info");
         setMessages((prev) => [
           ...prev,
           {
             sender: "agent",
-            text: `I have prepared the Razorpay Order: ${mockRazorpayOrderId}. Please complete the payment in the checkout window.`,
+            text: `I have prepared the Order: ${razorpayOrderId}. Please authorize sandbox payment in the right shield panel.`,
             timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
           }
         ]);
       }
-    }, 1000);
+    } catch (err) {
+      console.error(err);
+      logger("PAYMENT_SERVICE_FAILED", "Network error starting payment checkout.", "error");
+      setPaymentStep("failed");
+    }
   };
 
-  // Handle manual payment modal submission
-  const completeManualPayment = (success: boolean) => {
-    const addAudit = (step: string, message: string, status: "success" | "warning" | "error" | "info" = "success") => {
+  // Perform server-side HMAC check on the backend API
+  const verifyPaymentSignatureOnBackend = async (
+    orderId: string,
+    rzpOrderId: string,
+    rzpPaymentId: string,
+    rzpSignature: string
+  ) => {
+    setPaymentStep("verifying");
+    const logger = (step: string, message: string, status: "success" | "warning" | "error" | "info" = "success") => {
       const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
       setAuditLogs((prev) => [{ step, message, status, time }, ...prev]);
     };
 
-    if (success) {
-      addAudit("RAZORPAY_WEBHOOK_RECEIVED", "Received payment.captured webhook notification from Razorpay", "info");
-      addAudit("PAYMENT_CAPTURED", `Signature verified. Confirmed transaction of ${formatINR(activeCheckoutProduct.price)}`, "success");
-      setPaymentStep("captured");
-      setSuccessPurchases(prev => prev + 1);
+    logger("PAYMENT_VERIFICATION_STARTED", "Starting transaction verification with backend...", "info");
 
-      setMessages((prev) => [
-        ...prev,
-        {
-          sender: "agent",
-          text: `🎉 Thank you! Payment captured and verified successfully. Product is being prepared for shipping.`,
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-        }
-      ]);
-    } else {
-      addAudit("PAYMENT_FAILED", "Razorpay reported transaction authorization failure", "error");
-      setPaymentStep("failed");
-      setMessages((prev) => [
-        ...prev,
-        {
-          sender: "agent",
-          text: `❌ Payment failed or was canceled. You can try recovering the transaction using UPI or a different test card.`,
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-        }
-      ]);
+    try {
+      const response = await fetch("/api/payment/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          orderId,
+          razorpayOrderId: rzpOrderId,
+          razorpayPaymentId: rzpPaymentId,
+          razorpaySignature: rzpSignature,
+          sessionId,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (response.ok && data.success) {
+        setPaymentStep("captured");
+        setSuccessPurchases((prev) => prev + 1);
+        logger("PAYMENT_CAPTURED", `Signature validated. Order confirmed.`, "success");
+        setMessages((prev) => [
+          ...prev,
+          {
+            sender: "agent",
+            text: `🎉 Thank you! Payment captured and verified successfully. Order ID ${orderId} has been confirmed. Stock inventory updated.`,
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+          }
+        ]);
+      } else {
+        handleVerificationFailure(data.error || "Payment verification failed.");
+      }
+    } catch (err) {
+      console.error(err);
+      handleVerificationFailure("Network error during verification.");
     }
+  };
+
+  const handleVerificationFailure = (reason: string) => {
+    setPaymentStep("failed");
+    setBlockedPurchases((prev) => prev + 1);
+    const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    setAuditLogs((prev) => [
+      { step: "PAYMENT_FAILED", message: `Transaction failed: ${reason}`, status: "error", time },
+      ...prev
+    ]);
+    setMessages((prev) => [
+      ...prev,
+      {
+        sender: "agent",
+        text: `❌ Checkout failed: ${reason}`,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      }
+    ]);
+  };
+
+  // Handle manual payment modal submission
+  const completeManualPayment = async (success: boolean) => {
+    const mockPaymentId = `pay_mock_${Math.random().toString(36).substring(2, 12)}`;
+    const mockSignature = success ? "valid_mock_signature" : "invalid_mock_signature";
+    await verifyPaymentSignatureOnBackend(activeOrderId, activeRazorpayOrderId, mockPaymentId, mockSignature);
   };
 
   return (
@@ -950,24 +1071,38 @@ export default function AgentGuardHome() {
                     </div>
                     <div className="flex justify-between">
                       <span className="text-[#a1a1aa]">Internal Order:</span>
-                      <span className="text-white font-mono text-[10px]">ord_active_sandbox</span>
+                      <span className="text-white font-mono text-[9px] truncate max-w-[130px]" title={activeOrderId}>{activeOrderId || "creating..."}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-[#a1a1aa]">Razorpay ID:</span>
+                      <span className="text-white font-mono text-[9px] truncate max-w-[130px]" title={activeRazorpayOrderId}>{activeRazorpayOrderId || "creating..."}</span>
                     </div>
                   </div>
 
                   <div className="grid grid-cols-2 gap-2">
                     <button
                       onClick={() => completeManualPayment(false)}
-                      className="bg-rose-600 hover:bg-rose-700 text-white font-semibold py-2 rounded-xl transition-colors"
+                      className="bg-rose-600 hover:bg-rose-700 text-white font-semibold py-2 rounded-xl transition-colors text-[10px]"
                     >
                       Fail Payment
                     </button>
                     <button
                       onClick={() => completeManualPayment(true)}
-                      className="bg-emerald-500 hover:bg-emerald-600 text-white font-semibold py-2 rounded-xl transition-colors"
+                      className="bg-emerald-500 hover:bg-emerald-600 text-white font-semibold py-2 rounded-xl transition-colors text-[10px]"
                     >
                       Authorize Payment
                     </button>
                   </div>
+                </div>
+              )}
+
+              {paymentStep === "verifying" && activeCheckoutProduct && (
+                <div className="bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 p-4 rounded-xl text-center space-y-2">
+                  <div className="h-6 w-6 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin mx-auto mb-1"></div>
+                  <p className="text-xs font-semibold">Verifying Signature...</p>
+                  <p className="text-[10px] text-[#a1a1aa]">
+                    Contacting backend verification service to validate payment HMAC and signature hashes...
+                  </p>
                 </div>
               )}
 
@@ -982,6 +1117,8 @@ export default function AgentGuardHome() {
                     onClick={() => {
                       setPaymentStep("none");
                       setActiveCheckoutProduct(null);
+                      setActiveOrderId("");
+                      setActiveRazorpayOrderId("");
                     }}
                     className="text-[10px] text-zinc-400 underline hover:text-white mt-1 block w-full text-center"
                   >
@@ -995,15 +1132,18 @@ export default function AgentGuardHome() {
                   <AlertTriangle className="h-7 w-7 mx-auto" />
                   <p className="text-xs font-semibold">Transaction Aborted</p>
                   <p className="text-[10px] text-[#a1a1aa]">
-                    The mock transaction was canceled by the customer or card declined. Policy Engine halted order processing.
+                    The transaction was canceled by the customer or checkout signature check failed. Safety policies halted execution.
                   </p>
                   <button
                     onClick={() => {
-                      setPaymentStep("paying");
+                      setPaymentStep("none");
+                      setActiveCheckoutProduct(null);
+                      setActiveOrderId("");
+                      setActiveRazorpayOrderId("");
                     }}
                     className="text-[10px] text-zinc-400 underline hover:text-white mt-1 block w-full text-center"
                   >
-                    Retry checkout
+                    Reset Sandbox
                   </button>
                 </div>
               )}

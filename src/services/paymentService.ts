@@ -22,16 +22,22 @@ export interface RazorpayOrderResult {
 }
 
 export class PaymentService {
-  private static isMockMode(): boolean {
+  /**
+   * Check if we should fall back to simulating payments.
+   */
+  public static isMockMode(): boolean {
+    if (process.env.NODE_ENV === "test") {
+      return true;
+    }
     const keyId = process.env.RAZORPAY_KEY_ID;
-    return !keyId || keyId === "rzp_test_placeholder";
+    return !keyId || keyId === "rzp_test_placeholder" || keyId.startsWith("rzp_test_your");
   }
 
   /**
    * Create an order in Razorpay (Test Mode).
    * Converts INR amount to paise (e.g. ₹1,899 -> 189900 paise).
    */
-  static async createOrder(input: RazorpayOrderInput): Promise<RazorpayOrderResult> {
+  static async createRazorpayOrder(input: RazorpayOrderInput): Promise<RazorpayOrderResult> {
     const amountInPaise = Math.round(input.amount * 100);
 
     if (this.isMockMode()) {
@@ -46,7 +52,6 @@ export class PaymentService {
       };
     }
 
-    // Official Razorpay SDK implementation (Phase 5)
     try {
       // Lazy-import to prevent bundle dependency issues if key not provided
       const Razorpay = require("razorpay");
@@ -86,9 +91,8 @@ export class PaymentService {
     signature: string
   ): boolean {
     if (this.isMockMode()) {
-      // Mock validation succeeds if signature starts with 'mock_sig_' or matches format
       console.log("[PaymentService] Mock Mode: Simulating signature verification.");
-      return signature.startsWith("mock_sig_") || signature === "valid_mock_signature";
+      return signature === "valid_mock_signature" || signature.startsWith("mock_sig_");
     }
 
     try {
@@ -116,7 +120,7 @@ export class PaymentService {
   ): boolean {
     if (this.isMockMode()) {
       console.log("[PaymentService] Mock Mode: Bypassing webhook verification.");
-      return signature === "mock_webhook_signature" || true;
+      return signature === "mock_webhook_signature";
     }
 
     try {
@@ -129,6 +133,30 @@ export class PaymentService {
     } catch (error) {
       console.error("[PaymentService] Webhook signature check failed:", error);
       return false;
+    }
+  }
+
+  /**
+   * Retrieve payment status for a Razorpay order.
+   */
+  static async getPaymentStatus(razorpayOrderId: string): Promise<string> {
+    if (this.isMockMode()) {
+      console.log(`[PaymentService] Mock Mode: Returning status 'created' for ${razorpayOrderId}`);
+      return "created";
+    }
+
+    try {
+      const Razorpay = require("razorpay");
+      const razorpay = new Razorpay({
+        key_id: process.env.RAZORPAY_KEY_ID,
+        key_secret: process.env.RAZORPAY_KEY_SECRET,
+      });
+
+      const order = await razorpay.orders.fetch(razorpayOrderId);
+      return order.status; // e.g. 'created', 'attempted', 'paid'
+    } catch (error) {
+      console.error("[PaymentService] Error fetching Razorpay order status:", error);
+      throw new Error("Failed to fetch payment status.");
     }
   }
 }

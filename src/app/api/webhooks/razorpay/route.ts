@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
+import { prisma } from "../../../../lib/prisma";
 import { PaymentService } from "../../../../services/paymentService";
 import { AuditService } from "../../../../services/auditService";
+
+export const dynamic = "force-dynamic";
 
 export async function POST(req: NextRequest) {
   try {
@@ -8,30 +11,110 @@ export async function POST(req: NextRequest) {
     const signature = req.headers.get("x-razorpay-signature") || "";
     const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET || "placeholder_webhook_secret";
 
-    // 1. Verify webhook signature
+    // 1. Verify raw webhook signature
     const isValid = PaymentService.verifyWebhookSignature(rawBody, signature, webhookSecret);
     if (!isValid) {
       console.warn("[Razorpay Webhook] Received invalid webhook signature header.");
+      // Log failure in audit trail if session/order can be extracted
+      try {
+        const payload = JSON.parse(rawBody);
+        const rzpOrderId = payload.payload?.payment?.entity?.order_id;
+        if (rzpOrderId) {
+          await AuditService.logStep(rzpOrderId, "webhook_rejected", `Webhook signature validation failed.`);
+        }
+      } catch {}
       return NextResponse.json({ error: "Invalid signature" }, { status: 400 });
     }
 
     const payload = JSON.parse(rawBody);
     const event = payload.event;
-    console.log(`[Razorpay Webhook] Verified event: ${event}`);
+    const paymentEntity = payload.payload?.payment?.entity;
+    const rzpOrderId = paymentEntity?.order_id;
+    const rzpPaymentId = paymentEntity?.id;
+    const amount = paymentEntity?.amount;
 
-    // 2. Handle captured event
+    await AuditService.logStep(
+      rzpOrderId || "unknown-session",
+      "webhook_verified",
+      `Webhook signature verified for event: ${event}`
+    );
+
+    // 2. Handle payment.captured event idempotently
     if (event === "payment.captured") {
-      const paymentEntity = payload.payload?.payment?.entity;
-      const razorpayOrderId = paymentEntity?.order_id;
-      const razorpayPaymentId = paymentEntity?.id;
-      const amount = paymentEntity?.amount;
-
       await AuditService.logStep(
-        razorpayOrderId || "unknown-session",
-        "PAYMENT_WEBHOOK",
-        `Webhook verified: Payment ${razorpayPaymentId} captured successfully. Amount: ₹${(amount / 100).toFixed(2)}`,
-        { razorpayPaymentId, razorpayOrderId, amount }
+        rzpOrderId || "unknown-session",
+        "webhook_received",
+        `Processing captured payment: ${rzpPaymentId}`
       );
+
+      if (rzpOrderId) {
+        // Retrieve internal Order
+        const order = await prisma.order.findFirst({
+          where: { razorpayOrderId: rzpOrderId },
+          include: { items: true },
+        });
+
+        if (order) {
+          // Idempotency Guard: Verify if the order is already processed
+          if (order.status === "PAYMENT_CAPTURED") {
+            await AuditService.logStep(
+              rzpOrderId,
+              "order_confirmed",
+              `Webhook duplicate event detected. Order ${order.id} is already PAYMENT_CAPTURED. No action taken.`
+            );
+            return NextResponse.json({ success: true, message: "Webhook processed idempotently." });
+          }
+
+          try {
+            await prisma.$transaction(async (tx) => {
+              // Optimistic locking update: only update if order status is PENDING_PAYMENT
+              const updated = await tx.order.updateMany({
+                where: {
+                  id: order.id,
+                  status: "PENDING_PAYMENT"
+                },
+                data: {
+                  status: "PAYMENT_CAPTURED",
+                  razorpayPaymentId: rzpPaymentId,
+                  razorpaySignature: signature || "webhook_verified",
+                }
+              });
+
+              if (updated.count === 0) {
+                throw new Error("ALREADY_PROCESSED");
+              }
+
+              // Successfully updated status. Now deduct stock.
+              for (const item of order.items) {
+                const product = await tx.product.findUnique({ where: { id: item.productId } });
+                if (product) {
+                  const newStock = Math.max(0, product.stock - item.quantity);
+                  await tx.product.update({
+                    where: { id: item.productId },
+                    data: { stock: newStock },
+                  });
+                }
+              }
+            });
+
+            await AuditService.logStep(rzpOrderId, "payment_captured", `Order ${order.id} marked as PAYMENT_CAPTURED via webhook`);
+            await AuditService.logStep(rzpOrderId, "inventory_updated", `Webhook: Deducted items for order ${order.id}`);
+            await AuditService.logStep(rzpOrderId, "order_confirmed", `Order ${order.id} confirmed successfully via webhook`);
+          } catch (txError: any) {
+            if (txError.message === "ALREADY_PROCESSED") {
+              await AuditService.logStep(
+                rzpOrderId,
+                "order_confirmed",
+                `Webhook concurrent duplicate event detected. Order ${order.id} was already captured. Skipping updates.`
+              );
+              return NextResponse.json({ success: true, message: "Webhook processed idempotently." });
+            }
+            throw txError;
+          }
+        } else {
+          console.warn(`[Razorpay Webhook] Order matching Razorpay ID ${rzpOrderId} not found in database.`);
+        }
+      }
     }
 
     return NextResponse.json({ success: true, event }, { status: 200 });
