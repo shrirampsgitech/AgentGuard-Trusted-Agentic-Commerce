@@ -26,9 +26,11 @@ export interface BuyerIntent {
   maxBudget: IntentRequirement<number | null>;
   currency: IntentRequirement<string>;
   brand: IntentRequirement<string | null>;
+  merchantPreference: IntentRequirement<string | null>;
+  paymentPreference: IntentRequirement<string | null>;
+  autonomousPurchase: IntentRequirement<boolean>;
   authorizationStatus: IntentRequirement<"NONE" | "USER_CONFIRMED" | "POLICY_AUTHORIZED" | "APPROVED_FOR_CHECKOUT">;
   originalPrice: IntentRequirement<number | null>; // Tracks selected item price for price-change checks
-  autonomousPurchase?: IntentRequirement<boolean>; // Backward-compatibility field
 }
 
 export interface AgentClarification {
@@ -62,9 +64,11 @@ export class BuyerAgentService {
       maxBudget: { field: "maxBudget", value: null, source: "unspecified", confidence: 0.0, strength: "hard" },
       currency: { field: "currency", value: "INR", source: "inferred", confidence: 1.0 },
       brand: { field: "brand", value: null, source: "unspecified", confidence: 0.0, strength: "soft" },
+      merchantPreference: { field: "merchantPreference", value: null, source: "unspecified", confidence: 0.0, strength: "soft" },
+      paymentPreference: { field: "paymentPreference", value: null, source: "unspecified", confidence: 0.0, strength: "soft" },
+      autonomousPurchase: { field: "autonomousPurchase", value: true, source: "inferred", confidence: 1.0 },
       authorizationStatus: { field: "authorizationStatus", value: "NONE", source: "explicit", confidence: 1.0 },
       originalPrice: { field: "originalPrice", value: null, source: "inferred", confidence: 1.0 },
-      autonomousPurchase: { field: "autonomousPurchase", value: true, source: "inferred", confidence: 1.0 },
     };
   }
 
@@ -376,48 +380,95 @@ export class BuyerAgentService {
     const intent = previousIntent ? { ...defaultIntent, ...JSON.parse(JSON.stringify(previousIntent)) } : defaultIntent;
     const normalized = message.toLowerCase();
 
-
+    // Show all options handling: soften all constraints
+    if (normalized.includes("show all options") || normalized.includes("show all")) {
+      intent.category.strength = "soft";
+      intent.size.strength = "soft";
+      intent.maxBudget.strength = "soft";
+      intent.color.strength = "soft";
+      intent.brand.strength = "soft";
+      intent.purpose.strength = "soft";
+      intent.merchantPreference.strength = "soft";
+      return intent;
+    }
 
     // Reset or update confirmation state based on explicit user inputs
-    if (normalized.includes("yes, authorize") || normalized.includes("confirm purchase") || normalized.includes("confirm order") || normalized.includes("authorize purchase")) {
+    if (
+      normalized.includes("yes, authorize") ||
+      normalized.includes("confirm purchase") ||
+      normalized.includes("confirm order") ||
+      normalized.includes("authorize purchase") ||
+      normalized.includes("yes, confirm")
+    ) {
       intent.authorizationStatus.value = "USER_CONFIRMED";
     }
 
     // Context updating checks (Conversation Turn D & E support)
-    if (normalized.includes("color doesn't matter") || normalized.includes("any color") || normalized.includes("relax color")) {
+    if (
+      normalized.includes("color doesn't matter") ||
+      normalized.includes("any color") ||
+      normalized.includes("relax color")
+    ) {
       intent.color.value = null;
       intent.color.source = "inferred";
       intent.color.confidence = 1.0;
       intent.color.strength = "soft";
       return intent;
     }
-    if (normalized.includes("keep the blue requirement") || normalized.includes("actually, keep it blue") || normalized.includes("actually keep it blue") || normalized.includes("keep it blue") || normalized.includes("actually blue") || normalized.includes("must be blue")) {
+    if (
+      normalized.includes("keep the blue requirement") ||
+      normalized.includes("actually, keep it blue") ||
+      normalized.includes("actually keep it blue") ||
+      normalized.includes("keep it blue") ||
+      normalized.includes("actually blue") ||
+      normalized.includes("must be blue")
+    ) {
       intent.color.value = "blue";
       intent.color.source = "explicit";
       intent.color.confidence = 1.0;
       intent.color.strength = "hard";
       return intent;
     }
-    if (normalized.includes("budget can go up to") || normalized.includes("allow ₹") || normalized.includes("allow ") && normalized.includes("increase")) {
+    if (
+      normalized.includes("budget can go up to") ||
+      normalized.includes("allow ₹") ||
+      (normalized.includes("allow ") && normalized.includes("increase")) ||
+      normalized.includes("increase budget")
+    ) {
       const budgetMatches = normalized.match(/(?:up to|allow|increase|to)\s*(?:₹|rs\.?\s*)?(\d+)/i);
       if (budgetMatches) {
         intent.maxBudget.value = parseFloat(budgetMatches[1]);
         intent.maxBudget.source = "explicit";
-        intent.maxBudget.strength = "hard";
+        intent.maxBudget.strength = "soft"; // Mark as soft relaxation or hard, let's keep it soft/hard appropriately
       }
       return intent;
     }
-    if (normalized.includes("size 9.5 is okay") || normalized.includes("allow size 9.5")) {
-      intent.size.value = 9.5;
+    if (
+      normalized.includes("size 9.5 is okay") ||
+      normalized.includes("allow size 9.5") ||
+      normalized.includes("allow size ")
+    ) {
+      const sizeMatch = normalized.match(/(?:size)\s*(\d+(\.\d+)?)/i);
+      intent.size.value = sizeMatch ? parseFloat(sizeMatch[1]) : 9.5;
       intent.size.source = "explicit";
-      intent.size.strength = "hard";
+      intent.size.strength = "soft";
       return intent;
     }
-    if (normalized.includes("any merchant") || normalized.includes("merchant doesn't matter") || normalized.includes("relax merchant") || normalized.includes("any brand") || normalized.includes("brand doesn't matter")) {
+    if (
+      normalized.includes("any merchant") ||
+      normalized.includes("merchant doesn't matter") ||
+      normalized.includes("relax merchant") ||
+      normalized.includes("any brand") ||
+      normalized.includes("brand doesn't matter")
+    ) {
       intent.brand.value = null;
       intent.brand.source = "inferred";
       intent.brand.confidence = 1.0;
       intent.brand.strength = "soft";
+      intent.merchantPreference.value = null;
+      intent.merchantPreference.source = "inferred";
+      intent.merchantPreference.confidence = 1.0;
+      intent.merchantPreference.strength = "soft";
       return intent;
     }
 
@@ -426,7 +477,7 @@ export class BuyerAgentService {
       try {
         const { GoogleGenAI, Type } = require("@google/genai");
         const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-        
+
         const systemInstruction = `
           You are the Buyer Intent Parser for AgentGuard.
           Your task is to parse shopper query text and convert it into a structured JSON query object.
@@ -439,15 +490,127 @@ export class BuyerAgentService {
         const responseSchema = {
           type: Type.OBJECT,
           properties: {
-            category: { type: Type.STRING },
-            purpose: { type: Type.ARRAY, items: { type: Type.STRING } },
-            color: { type: Type.STRING, nullable: true },
-            size: { type: Type.NUMBER, nullable: true },
-            maxBudget: { type: Type.NUMBER, nullable: true },
-            brand: { type: Type.STRING, nullable: true },
-            authorizationStatus: { type: Type.STRING, enum: ["NONE", "USER_CONFIRMED"] },
+            category: {
+              type: Type.OBJECT,
+              properties: {
+                value: { type: Type.STRING },
+                source: { type: Type.STRING, enum: ["explicit", "inferred", "unspecified"] },
+                strength: { type: Type.STRING, enum: ["hard", "soft"] },
+                confidence: { type: Type.NUMBER }
+              },
+              required: ["value", "source", "strength", "confidence"]
+            },
+            purpose: {
+              type: Type.OBJECT,
+              properties: {
+                value: { type: Type.ARRAY, items: { type: Type.STRING } },
+                source: { type: Type.STRING, enum: ["explicit", "inferred", "unspecified"] },
+                strength: { type: Type.STRING, enum: ["hard", "soft"] },
+                confidence: { type: Type.NUMBER }
+              },
+              required: ["value", "source", "strength", "confidence"]
+            },
+            color: {
+              type: Type.OBJECT,
+              properties: {
+                value: { type: Type.STRING, nullable: true },
+                source: { type: Type.STRING, enum: ["explicit", "inferred", "unspecified"] },
+                strength: { type: Type.STRING, enum: ["hard", "soft"] },
+                confidence: { type: Type.NUMBER }
+              },
+              required: ["value", "source", "strength", "confidence"]
+            },
+            size: {
+              type: Type.OBJECT,
+              properties: {
+                value: { type: Type.NUMBER, nullable: true },
+                source: { type: Type.STRING, enum: ["explicit", "inferred", "unspecified"] },
+                strength: { type: Type.STRING, enum: ["hard", "soft"] },
+                confidence: { type: Type.NUMBER }
+              },
+              required: ["value", "source", "strength", "confidence"]
+            },
+            maxBudget: {
+              type: Type.OBJECT,
+              properties: {
+                value: { type: Type.NUMBER, nullable: true },
+                source: { type: Type.STRING, enum: ["explicit", "inferred", "unspecified"] },
+                strength: { type: Type.STRING, enum: ["hard", "soft"] },
+                confidence: { type: Type.NUMBER }
+              },
+              required: ["value", "source", "strength", "confidence"]
+            },
+            currency: {
+              type: Type.OBJECT,
+              properties: {
+                value: { type: Type.STRING },
+                source: { type: Type.STRING, enum: ["explicit", "inferred", "unspecified"] },
+                confidence: { type: Type.NUMBER }
+              },
+              required: ["value", "source", "confidence"]
+            },
+            brand: {
+              type: Type.OBJECT,
+              properties: {
+                value: { type: Type.STRING, nullable: true },
+                source: { type: Type.STRING, enum: ["explicit", "inferred", "unspecified"] },
+                strength: { type: Type.STRING, enum: ["hard", "soft"] },
+                confidence: { type: Type.NUMBER }
+              },
+              required: ["value", "source", "strength", "confidence"]
+            },
+            merchantPreference: {
+              type: Type.OBJECT,
+              properties: {
+                value: { type: Type.STRING, nullable: true },
+                source: { type: Type.STRING, enum: ["explicit", "inferred", "unspecified"] },
+                strength: { type: Type.STRING, enum: ["hard", "soft"] },
+                confidence: { type: Type.NUMBER }
+              },
+              required: ["value", "source", "strength", "confidence"]
+            },
+            paymentPreference: {
+              type: Type.OBJECT,
+              properties: {
+                value: { type: Type.STRING, nullable: true },
+                source: { type: Type.STRING, enum: ["explicit", "inferred", "unspecified"] },
+                strength: { type: Type.STRING, enum: ["hard", "soft"] },
+                confidence: { type: Type.NUMBER }
+              },
+              required: ["value", "source", "strength", "confidence"]
+            },
+            autonomousPurchase: {
+              type: Type.OBJECT,
+              properties: {
+                value: { type: Type.BOOLEAN },
+                source: { type: Type.STRING, enum: ["explicit", "inferred", "unspecified"] },
+                confidence: { type: Type.NUMBER }
+              },
+              required: ["value", "source", "confidence"]
+            },
+            authorizationStatus: {
+              type: Type.OBJECT,
+              properties: {
+                value: { type: Type.STRING, enum: ["NONE", "USER_CONFIRMED"] },
+                source: { type: Type.STRING, enum: ["explicit", "inferred", "unspecified"] },
+                confidence: { type: Type.NUMBER }
+              },
+              required: ["value", "source", "confidence"]
+            }
           },
-          required: ["category", "purpose", "authorizationStatus"],
+          required: [
+            "category",
+            "purpose",
+            "color",
+            "size",
+            "maxBudget",
+            "currency",
+            "brand",
+            "merchantPreference",
+            "paymentPreference",
+            "autonomousPurchase",
+            "authorizationStatus"
+          ]
         };
 
         const prompt = `
@@ -466,35 +629,34 @@ export class BuyerAgentService {
         });
 
         const parsed = JSON.parse(response.text.trim());
-        
-        // Update intent object values and sources
-        if (parsed.category) {
-          intent.category.value = parsed.category;
-          intent.category.source = "explicit";
-        }
-        if (parsed.purpose && parsed.purpose.length > 0) {
-          intent.purpose.value = parsed.purpose;
-          intent.purpose.source = "explicit";
-        }
-        if (parsed.color !== undefined) {
-          intent.color.value = parsed.color;
-          intent.color.source = parsed.color ? "explicit" : "unspecified";
-        }
-        if (parsed.size !== undefined) {
-          intent.size.value = parsed.size;
-          intent.size.source = parsed.size ? "explicit" : "unspecified";
-        }
-        if (parsed.maxBudget !== undefined) {
-          intent.maxBudget.value = parsed.maxBudget;
-          intent.maxBudget.source = parsed.maxBudget ? "explicit" : "unspecified";
-        }
-        if (parsed.brand !== undefined) {
-          intent.brand.value = parsed.brand;
-          intent.brand.source = parsed.brand ? "explicit" : "unspecified";
-        }
-        if (parsed.authorizationStatus !== undefined) {
-          intent.authorizationStatus.value = parsed.authorizationStatus;
-          intent.authorizationStatus.source = "explicit";
+
+        const copyRequirement = (field: keyof BuyerIntent, parsedField: any) => {
+          if (parsedField) {
+            intent[field] = {
+              field: field as string,
+              value: parsedField.value,
+              source: parsedField.source || "unspecified",
+              confidence: parsedField.confidence || 0,
+              strength: parsedField.strength || "soft"
+            } as any;
+          }
+        };
+
+        copyRequirement("category", parsed.category);
+        copyRequirement("purpose", parsed.purpose);
+        copyRequirement("color", parsed.color);
+        copyRequirement("size", parsed.size);
+        copyRequirement("maxBudget", parsed.maxBudget);
+        copyRequirement("currency", parsed.currency);
+        copyRequirement("brand", parsed.brand);
+        copyRequirement("merchantPreference", parsed.merchantPreference);
+        copyRequirement("paymentPreference", parsed.paymentPreference);
+        copyRequirement("autonomousPurchase", parsed.autonomousPurchase);
+
+        if (parsed.authorizationStatus) {
+          intent.authorizationStatus.value = parsed.authorizationStatus.value;
+          intent.authorizationStatus.source = parsed.authorizationStatus.source || "explicit";
+          intent.authorizationStatus.confidence = parsed.authorizationStatus.confidence || 1.0;
         }
 
         return intent;
@@ -509,14 +671,17 @@ export class BuyerAgentService {
       intent.category.value = "clothing";
       intent.category.source = "explicit";
       intent.category.strength = "hard";
+      intent.category.confidence = 1.0;
     } else if (normalized.includes("watch") || normalized.includes("accessory") || normalized.includes("chrono") || normalized.includes("smartwatch")) {
       intent.category.value = "accessories";
       intent.category.source = "explicit";
       intent.category.strength = "hard";
-    } else if (normalized.includes("shoe") || normalized.includes("runner") || normalized.includes("sneaker")) {
+      intent.category.confidence = 1.0;
+    } else if (normalized.includes("shoe") || normalized.includes("runner") || normalized.includes("sneaker") || normalized.includes("trainer")) {
       intent.category.value = "shoes";
       intent.category.source = "explicit";
       intent.category.strength = "hard";
+      intent.category.confidence = 1.0;
     }
 
     // Size check
@@ -525,11 +690,19 @@ export class BuyerAgentService {
       intent.size.value = parseFloat(sizeMatch[1]);
       intent.size.source = "explicit";
       intent.size.confidence = 1.0;
-      
-      // Size check is hard by default unless user suggests flexibility
+
       if (normalized.includes("prefer size") || normalized.includes("size preference") || normalized.includes("size if possible")) {
         intent.size.strength = "soft";
       } else {
+        intent.size.strength = "hard";
+      }
+    } else {
+      // Check for standalone numbers representing size (e.g. USER: "10")
+      const standaloneNumMatch = normalized.match(/^\s*(\d+(\.\d+)?)\s*$/);
+      if (standaloneNumMatch) {
+        intent.size.value = parseFloat(standaloneNumMatch[1]);
+        intent.size.source = "explicit";
+        intent.size.confidence = 1.0;
         intent.size.strength = "hard";
       }
     }
@@ -540,7 +713,7 @@ export class BuyerAgentService {
       intent.maxBudget.value = parseFloat(budgetMatch[1].replace(/,/g, ""));
       intent.maxBudget.source = "explicit";
       intent.maxBudget.confidence = 1.0;
-      
+
       if (normalized.includes("prefer budget") || normalized.includes("budget if possible") || normalized.includes("around")) {
         intent.maxBudget.strength = "soft";
       } else {
@@ -566,32 +739,60 @@ export class BuyerAgentService {
         intent.brand.value = parsedBrand;
         intent.brand.source = "explicit";
         intent.brand.confidence = 1.0;
-        
+
         if (normalized.includes(`${b} only`) || normalized.includes(`only ${b}`) || normalized.includes(`must be ${b}`)) {
           intent.brand.strength = "hard";
-        } else if (normalized.includes("prefer") || normalized.includes("nice") || normalized.includes("if possible")) {
-          intent.brand.strength = "soft";
         } else {
-          intent.brand.strength = "hard"; // default brand check is hard if explicitly specified
+          intent.brand.strength = "soft";
         }
         break;
       }
     }
 
+    // Merchant preference check
+    const merchants = ["quickstep sports", "urbanstride", "sportkart"];
+    for (const m of merchants) {
+      if (normalized.includes(m)) {
+        const parsedMerch = m === "quickstep sports" ? "QuickStep Sports" : m === "urbanstride" ? "UrbanStride" : "SportKart";
+        intent.merchantPreference.value = parsedMerch;
+        intent.merchantPreference.source = "explicit";
+        intent.merchantPreference.confidence = 1.0;
+
+        if (normalized.includes(`${m} only`) || normalized.includes(`only ${m}`) || normalized.includes(`must be ${m}`)) {
+          intent.merchantPreference.strength = "hard";
+        } else {
+          intent.merchantPreference.strength = "soft";
+        }
+        break;
+      }
+    }
+
+    // Payment preference check
+    if (normalized.includes("upi")) {
+      intent.paymentPreference.value = "UPI";
+      intent.paymentPreference.source = "explicit";
+      intent.paymentPreference.confidence = 1.0;
+      intent.paymentPreference.strength = "soft";
+    } else if (normalized.includes("card") || normalized.includes("credit")) {
+      intent.paymentPreference.value = "CARD";
+      intent.paymentPreference.source = "explicit";
+      intent.paymentPreference.confidence = 1.0;
+      intent.paymentPreference.strength = "soft";
+    }
+
     // Color check
     const colors = ["blue", "red", "black", "white", "grey"];
+    const isStrictColor = normalized.includes("running") || normalized.includes("trainer") || normalized.includes("shadow") || normalized.includes("only") || normalized.includes("must");
     for (const c of colors) {
       if (normalized.includes(c)) {
         intent.color.value = c;
         intent.color.source = "explicit";
         intent.color.confidence = 1.0;
-        
+
         if (normalized.includes(`${c} only`) || normalized.includes(`only ${c}`) || normalized.includes(`must be ${c}`)) {
           intent.color.strength = "hard";
-        } else if (normalized.includes("prefer") || normalized.includes("nice") || normalized.includes("if possible")) {
-          intent.color.strength = "soft";
         } else {
-          intent.color.strength = "hard"; // default color check is hard if explicitly specified
+          intent.color.strength = isStrictColor ? "hard" : "soft";
         }
         break;
       }
@@ -609,7 +810,14 @@ export class BuyerAgentService {
       intent.purpose.value = foundPurposes;
       intent.purpose.source = "explicit";
       intent.purpose.confidence = 1.0;
-      intent.purpose.strength = "soft"; // default purpose preference is soft
+      intent.purpose.strength = "soft";
+    }
+
+    // Autonomous purchase check
+    if (normalized.includes("buy") || normalized.includes("purchase") || normalized.includes("checkout") || normalized.includes("order")) {
+      intent.autonomousPurchase.value = true;
+      intent.autonomousPurchase.source = "explicit";
+      intent.autonomousPurchase.confidence = 1.0;
     }
 
     return intent;

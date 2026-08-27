@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "../../../../lib/prisma";
 import { PaymentService } from "../../../../services/paymentService";
 import { AuditService } from "../../../../services/auditService";
+import { SessionStateService } from "../../../../services/sessionStateService";
 
 export const dynamic = "force-dynamic";
 
@@ -111,8 +112,81 @@ export async function POST(req: NextRequest) {
             }
             throw txError;
           }
+
+          // Sync session state to POLICY_AUTHORIZED on webhook success
+          try {
+            const sessions = await prisma.sessionState.findMany();
+            for (const session of sessions) {
+              const intent = session.buyerIntent as any;
+              if (intent && intent.authorizationStatus) {
+                // If this session was awaiting this checkout
+                if (session.selectedProductId === order.items[0]?.productId) {
+                  intent.authorizationStatus.value = "POLICY_AUTHORIZED";
+                  await SessionStateService.saveSession(
+                    session.id,
+                    intent,
+                    session.selectedProductId,
+                    session.relaxationDecisions,
+                    "POLICY_AUTHORIZED"
+                  );
+                  break;
+                }
+              }
+            }
+          } catch {}
+
         } else {
           console.warn(`[Razorpay Webhook] Order matching Razorpay ID ${rzpOrderId} not found in database.`);
+        }
+      }
+    }
+
+    // Handle payment.failed event
+    if (event === "payment.failed") {
+      await AuditService.logStep(
+        rzpOrderId || "unknown-session",
+        "webhook_received",
+        `Processing failed payment: ${rzpPaymentId}`
+      );
+
+      if (rzpOrderId) {
+        const order = await prisma.order.findFirst({
+          where: { razorpayOrderId: rzpOrderId },
+          include: { items: true },
+        });
+
+        if (order && order.status === "PENDING_PAYMENT") {
+          await prisma.order.update({
+            where: { id: order.id },
+            data: {
+              status: "PAYMENT_FAILED",
+              razorpayPaymentId: rzpPaymentId,
+              razorpaySignature: signature || "webhook_failed",
+            },
+          });
+
+          await AuditService.logStep(rzpOrderId, "payment_failed", `Order ${order.id} marked as PAYMENT_FAILED via webhook`);
+
+          // Sync session state to NONE
+          try {
+            const sessions = await prisma.sessionState.findMany();
+            for (const session of sessions) {
+              const intent = session.buyerIntent as any;
+              if (session.selectedProductId === order.items[0]?.productId) {
+                if (intent && intent.authorizationStatus) {
+                  intent.authorizationStatus.value = "NONE";
+                  await SessionStateService.saveSession(
+                    session.id,
+                    intent,
+                    session.selectedProductId,
+                    session.relaxationDecisions,
+                    "NONE"
+                  );
+                  break;
+                }
+              }
+            }
+          } catch {}
         }
       }
     }

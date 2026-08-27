@@ -19,102 +19,14 @@ import {
   Bot,
   Database,
   Sliders,
-  DollarSign
+  Sparkles,
+  HelpCircle,
+  ArrowRight,
+  Flame,
+  UserCheck,
+  Check,
+  X
 } from "lucide-react";
-
-// Mock products database for client simulation
-const MOCK_PRODUCTS = [
-  {
-    id: "prod-101",
-    merchantId: "merchant-1",
-    merchantName: "QuickStep Sports",
-    name: "SwiftRun Blue Trainer",
-    category: "shoes",
-    purpose: ["running", "training"],
-    color: "blue",
-    sizes: [8, 9, 10, 11],
-    price: 1899,
-    currency: "INR",
-    rating: 4.5,
-    stock: 8,
-    returnDays: 30,
-  },
-  {
-    id: "prod-102",
-    merchantId: "merchant-1",
-    merchantName: "QuickStep Sports",
-    name: "AeroMax Black Sneaker",
-    category: "shoes",
-    purpose: ["running", "walking"],
-    color: "black",
-    sizes: [7, 8, 9, 10],
-    price: 1799,
-    currency: "INR",
-    rating: 4.2,
-    stock: 15,
-    returnDays: 14,
-  },
-  {
-    id: "prod-103",
-    merchantId: "merchant-1",
-    merchantName: "QuickStep Sports",
-    name: "TrailBlazer Red Hike",
-    category: "shoes",
-    purpose: ["hiking", "outdoor"],
-    color: "red",
-    sizes: [9, 10, 11, 12],
-    price: 2499,
-    currency: "INR",
-    rating: 4.7,
-    stock: 4,
-    returnDays: 30,
-  },
-  {
-    id: "prod-104",
-    merchantId: "merchant-1",
-    merchantName: "QuickStep Sports",
-    name: "CloudPace Grey Runner",
-    category: "shoes",
-    purpose: ["running", "marathon"],
-    color: "grey",
-    sizes: [8, 9, 10],
-    price: 1999,
-    currency: "INR",
-    rating: 4.6,
-    stock: 0, // OUT OF STOCK
-    returnDays: 30,
-  },
-  {
-    id: "prod-201",
-    merchantId: "merchant-2",
-    merchantName: "Urban Style Outfitters",
-    name: "Denim Trucker Jacket",
-    category: "clothing",
-    purpose: ["casual", "fashion"],
-    color: "blue",
-    sizes: [9.5, 10, 10.5],
-    price: 1499,
-    currency: "INR",
-    rating: 4.4,
-    stock: 20,
-    returnDays: 15,
-  },
-  {
-    id: "prod-301",
-    merchantId: "merchant-3",
-    merchantName: "Apex Chrono",
-    name: "Legacy Quartz Watch",
-    category: "accessories",
-    purpose: ["formal", "casual"],
-    color: "black",
-    sizes: [10],
-    price: 2999,
-    currency: "INR",
-    rating: 4.8,
-    stock: 5,
-    returnDays: 30,
-  }
-];
 
 interface Message {
   sender: "user" | "agent";
@@ -131,7 +43,7 @@ interface AuditLog {
   time: string;
 }
 
-export default function AgentGuardHome() {
+export default function Home() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputMessage, setInputMessage] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
@@ -147,7 +59,7 @@ export default function AgentGuardHome() {
   const [allowedMerchants, setAllowedMerchants] = useState<string[]>(["QuickStep Sports", "UrbanStride"]);
   const [allowedPaymentMethods, setAllowedPaymentMethods] = useState<string[]>(["UPI"]);
   
-  // Dashboard states
+  // Dashboard stats
   const [totalRequests, setTotalRequests] = useState(142);
   const [successPurchases, setSuccessPurchases] = useState(84);
   const [blockedPurchases, setBlockedPurchases] = useState(58);
@@ -158,7 +70,16 @@ export default function AgentGuardHome() {
   const [activeRazorpayOrderId, setActiveRazorpayOrderId] = useState<string>("");
   const [paymentStep, setPaymentStep] = useState<"none" | "paying" | "verifying" | "captured" | "failed">("none");
 
+  // Orders list
+  const [orders, setOrders] = useState<any[]>([]);
+  const [ordersFilter, setOrdersFilter] = useState<"ALL" | "SUCCESSFUL" | "FAILED" | "BLOCKED">("ALL");
+
+  // Live database catalog showcase
+  const [liveCatalog, setLiveCatalog] = useState<any[]>([]);
+
+  // Refs
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const sandboxRef = useRef<HTMLDivElement>(null);
 
   // Persistence helper for policy adjustments
   const savePolicyToBackend = async (
@@ -180,6 +101,7 @@ export default function AgentGuardHome() {
           allowedPaymentMethods: payments,
         }),
       });
+      fetchLiveCatalog();
     } catch (error) {
       console.error("Failed to save policy to backend:", error);
     }
@@ -209,10 +131,41 @@ export default function AgentGuardHome() {
     savePolicyToBackend(policyLimit, policyAutonomy, allowedCategories, allowedMerchants, updated);
   };
 
-  // Initialize with system message & health checks
+  // Fetch live products
+  const fetchLiveCatalog = async () => {
+    try {
+      const res = await fetch("/api/products");
+      if (res.ok) {
+        const data = await res.json();
+        setLiveCatalog(data);
+      }
+    } catch (error) {
+      console.warn("Catalog fetch failed, falling back to static schema mock.", error);
+    }
+  };
+
+  // Fetch live orders
+  const fetchOrders = async () => {
+    try {
+      const res = await fetch("/api/orders");
+      const data = await res.json();
+      if (data.success && data.orders) {
+        setOrders(data.orders);
+      }
+    } catch (error) {
+      console.warn("Orders fetch failed.", error);
+    }
+  };
+
+  // Initialize page, session, and scripts
   useEffect(() => {
-    // Generate unique sessionId on start
-    setSessionId(`session_${Math.random().toString(36).substring(2, 12)}`);
+    // Generate or restore unique sessionId on start
+    let activeSessionId = localStorage.getItem("agentguard_sessionId");
+    if (!activeSessionId) {
+      activeSessionId = `session_${Math.random().toString(36).substring(2, 12)}`;
+      localStorage.setItem("agentguard_sessionId", activeSessionId);
+    }
+    setSessionId(activeSessionId);
 
     // Dynamically inject Razorpay checkout script
     const script = document.createElement("script");
@@ -229,16 +182,15 @@ export default function AgentGuardHome() {
       }
     ]);
     
-    // Fetch initial API health checks (fail gracefully to mock mode)
+    // Fetch initial health checks
     fetch("/api/health")
       .then((res) => res.json())
       .then((data) => setApiHealth(data))
-      .catch((err) => {
-        console.warn("Could not reach health check API, running in client-sandbox mode.", err);
+      .catch(() => {
         setApiHealth({ status: "healthy", database: "connected (mock)", mockMode: { gemini: true, razorpay: true } });
       });
 
-    // Load initial active policy settings
+    // Load active policy settings
     fetch("/api/policy")
       .then((res) => res.json())
       .then((data) => {
@@ -250,14 +202,45 @@ export default function AgentGuardHome() {
           setAllowedPaymentMethods(data.policy.allowedPaymentMethods || ["UPI"]);
         }
       })
-      .catch((err) => console.warn("Failed to fetch initial policy settings:", err));
+      .catch((err) => console.warn("Failed to fetch policy:", err));
 
-    // Populate default audit logs
+    // Restore persistent session
+    fetch(`/api/session?sessionId=${activeSessionId}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success && data.session) {
+          setSessionIntent(data.session.intent);
+          if (data.session.selectedProduct) {
+            setActiveCheckoutProduct(data.session.selectedProduct);
+          }
+          if (data.session.authorizationState) {
+            if (data.session.authorizationState === "APPROVED_FOR_CHECKOUT") {
+              setPaymentStep("paying");
+            } else if (data.session.authorizationState === "POLICY_AUTHORIZED") {
+              setPaymentStep("captured");
+            }
+          }
+        }
+        if (data.success && data.auditLogs && data.auditLogs.length > 0) {
+          setAuditLogs(data.auditLogs.map((l: any) => ({
+            step: l.step,
+            message: l.message,
+            status: l.step.includes("fail") || l.step.includes("block") ? "error" : "success",
+            time: new Date(l.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+          })));
+        }
+      })
+      .catch((err) => console.warn("Failed to restore session state:", err));
+
+    // Populate boot logs
     setAuditLogs([
       { step: "SYSTEM_BOOT", message: "AgentGuard microservices started successfully", status: "success", time: "14:11:41" },
       { step: "DB_INIT", message: "Connected to PostgreSQL database catalog pool", status: "success", time: "14:11:42" },
       { step: "POLICY_BOOT", message: "Deterministic Policy Engine initialized", status: "success", time: "14:11:42" }
     ]);
+
+    fetchLiveCatalog();
+    fetchOrders();
   }, []);
 
   // Scroll to bottom of chat
@@ -274,22 +257,22 @@ export default function AgentGuardHome() {
     }).format(val);
   };
 
-  // Pre-canned shopping templates
-  const applyTemplate = (text: string) => {
-    setInputMessage(text);
+  // Scroll to Sandbox helper
+  const scrollToSandbox = () => {
+    sandboxRef.current?.scrollIntoView({ behavior: "smooth" });
   };
 
-  // Core processing orchestration (Phase 3 Backend Chat integrations)
+  // Core processing orchestration
   const handleSendMessage = async (textToSend?: string) => {
     const rawText = textToSend || inputMessage;
     if (!rawText.trim()) return;
 
-    // Add user message to screen
     const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     const userMsg: Message = { sender: "user", text: rawText, timestamp };
     setMessages((prev) => [...prev, userMsg]);
     if (!textToSend) setInputMessage("");
     setIsProcessing(true);
+    setTotalRequests((prev) => prev + 1);
 
     try {
       const response = await fetch("/api/chat", {
@@ -300,204 +283,198 @@ export default function AgentGuardHome() {
           sessionId: sessionId,
           sessionIntent: sessionIntent,
           policyAutonomy: policyAutonomy,
-          policyLimit: policyLimit,
+          policyLimit: policyLimit
         }),
       });
 
       const data = await response.json();
-      
-      // Update session state
-      setSessionIntent(data.intent);
-      
-      // Check block/success count updates from audit logs
-      if (data.auditLogs) {
-        const blocks = data.auditLogs.filter((log: any) => log.step.includes("BLOCKED") || log.step.includes("BLOCK")).length;
-        if (blocks > 0) setBlockedPurchases((prev) => prev + 1);
-        
-        // Render logs in the right panel
-        const formattedLogs = data.auditLogs.map((log: any) => ({
-          step: log.step,
-          message: log.message,
-          status: log.step.includes("BLOCKED") || log.step.includes("FAIL")
-            ? "error"
-            : log.step.includes("WARN") || log.step.includes("ALERT") || log.step.includes("RELAX")
-            ? "warning"
-            : "success",
-          time: new Date(log.timestamp).toLocaleTimeString([], {
-            hour: "2-digit",
-            minute: "2-digit",
-            second: "2-digit",
-          }),
-        }));
-        setAuditLogs(formattedLogs);
-      }
-
-      // Add Agent response message
-      let msgType: "text" | "product-card" | "alternatives-card" | "clarification" = "text";
-      let msgData: any = null;
-
-      if (data.status === "NEEDS_CLARIFICATION") {
-        msgType = "clarification";
-      } else if (
-        data.status === "PRODUCTS_FOUND" ||
-        data.status === "APPROVED_FOR_CHECKOUT" ||
-        data.status === "WAITING_FOR_USER"
-      ) {
-        msgType = "product-card";
-        msgData = {
-          product: data.selectedProduct,
-          size: data.intent?.size?.value,
-          color: data.intent?.color?.value || "any",
-          policyResult: data.policyResult,
-        };
-      } else if (data.status === "NO_EXACT_MATCH") {
-        msgType = "alternatives-card";
-        msgData = {
-          alternatives: data.alternatives.map((a: any) => ({
-            ...a.product,
-            explanation: a.explanation,
-          })),
-          originalPreferences: {
-            color: data.intent?.color?.value,
-            size: data.intent?.size?.value,
-            budget: data.intent?.maxBudget?.value,
-          },
-        };
-      }
-
-      setMessages((prev) => [
-        ...prev,
-        {
-          sender: "agent",
-          text: data.message,
-          timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-          type: msgType,
-          data: msgData,
-        },
-      ]);
-      
-      setTotalRequests((prev) => prev + 1);
-    } catch (error) {
-      console.error("[Chat UI] Network or server execution failed:", error);
-      setMessages((prev) => [
-        ...prev,
-        {
-          sender: "agent",
-          text: "I encountered a communication error with the Buyer Agent service. Please verify your server is running.",
-          timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-        },
-      ]);
-    } finally {
       setIsProcessing(false);
+
+      if (response.ok) {
+        setSessionIntent(data.intent);
+
+        let msgType: "text" | "product-card" | "alternatives-card" | "clarification" = "text";
+        let cardData = null;
+
+        if (data.status === "NEEDS_CLARIFICATION") {
+          msgType = "clarification";
+        } else if (data.status === "PRODUCTS_FOUND" && data.selectedProduct) {
+          msgType = "product-card";
+          cardData = {
+            product: data.selectedProduct,
+            size: data.intent.size?.value || 10,
+            color: data.intent.color?.value || data.selectedProduct.color,
+            policyResult: data.policyResult,
+            products: data.products,
+          };
+          setActiveCheckoutProduct(data.selectedProduct);
+        } else if (data.status === "APPROVED_FOR_CHECKOUT" && data.selectedProduct) {
+          msgType = "product-card";
+          cardData = {
+            product: data.selectedProduct,
+            size: data.intent.size?.value || 10,
+            color: data.intent.color?.value || data.selectedProduct.color,
+            policyResult: data.policyResult,
+            products: data.products,
+          };
+          setActiveCheckoutProduct(data.selectedProduct);
+          // If autonomy level is 3, automatically initiate payment order!
+          if (policyAutonomy === 3) {
+            triggerPaymentOrder(data.selectedProduct, data.intent);
+          }
+        } else if (data.status === "NO_EXACT_MATCH") {
+          msgType = "alternatives-card";
+          cardData = {
+            alternatives: data.alternatives.map((a: any) => ({
+              product: a.product,
+              violatedConstraint: a.violatedConstraint,
+              difference: a.difference,
+              explanation: a.explanation
+            }))
+          };
+        } else if (data.status === "WAITING_FOR_USER") {
+          msgType = "product-card";
+          cardData = {
+            product: data.selectedProduct,
+            size: data.intent.size?.value || 10,
+            color: data.intent.color?.value || data.selectedProduct?.color,
+            policyResult: data.policyResult,
+          };
+          setActiveCheckoutProduct(data.selectedProduct);
+        }
+
+        setMessages((prev) => [
+          ...prev,
+          {
+            sender: "agent",
+            text: data.message,
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            type: msgType,
+            data: cardData,
+          }
+        ]);
+
+        if (data.auditLogs) {
+          setAuditLogs(data.auditLogs.map((l: any) => ({
+            step: l.step,
+            message: l.message,
+            status: l.step.includes("fail") || l.step.includes("block") ? "error" : "success",
+            time: new Date(l.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+          })));
+        }
+
+        // Increment block counter if blocked by policy
+        if (data.policyResult?.decision === "BLOCK") {
+          setBlockedPurchases((prev) => prev + 1);
+        }
+
+        fetchLiveCatalog();
+      } else {
+        setMessages((prev) => [
+          ...prev,
+          {
+            sender: "agent",
+            text: `⚠️ Request failed: ${data.error || "Unable to retrieve recommendation"}`,
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            type: "text"
+          }
+        ]);
+      }
+    } catch (err) {
+      console.error(err);
+      setIsProcessing(false);
+      setMessages((prev) => [
+        ...prev,
+        {
+          sender: "agent",
+          text: "⚠️ Communication breakdown with agent microservices.",
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          type: "text"
+        }
+      ]);
     }
   };
 
-  // Launch Razorpay Order trigger
-  const triggerPaymentOrder = async (product: any, addAudit?: any, autonomous = false) => {
-    const logger = addAudit || ((step: string, message: string, status: string) => {
-      const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-      setAuditLogs((prev) => [{ step, message, status: status as any, time }, ...prev]);
-    });
-
-    logger("PAYMENT_SERVICE", `Contacting checkout API to initiate safety validation and order creation...`, "info");
-    setActiveCheckoutProduct(product);
+  // Coordinate Sandbox checkout initialization
+  const triggerPaymentOrder = async (product: any, currentIntent: any = null, forceUserConfirm = false) => {
     setPaymentStep("paying");
+    const logger = (step: string, message: string, status: "success" | "warning" | "error" | "info" = "success") => {
+      const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      setAuditLogs((prev) => [{ step, message, status, time }, ...prev]);
+    };
+
+    logger("CHECKOUT_INITIATED", `Sending checkout parameters to secure verification gateway...`, "info");
 
     try {
-      const checkoutSize = sessionIntent?.size?.value || 10;
-      const checkoutOriginalPrice = sessionIntent?.originalPrice?.value !== undefined 
-        ? sessionIntent.originalPrice.value 
-        : product.price;
-      const checkoutAuthStatus = sessionIntent?.authorizationStatus?.value || "NONE";
-
-      const res = await fetch("/api/checkout", {
+      const activeIntent = currentIntent || sessionIntent;
+      const response = await fetch("/api/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           sessionId,
           productId: product.id,
-          size: checkoutSize,
-          quantity: 1,
-          originalPrice: checkoutOriginalPrice,
-          authorizationStatus: checkoutAuthStatus,
+          size: activeIntent?.size?.value || 10,
+          originalPrice: activeIntent?.originalPrice?.value || product.price,
+          authorizationStatus: forceUserConfirm ? "USER_CONFIRMED" : (activeIntent?.authorizationStatus?.value || "NONE"),
         }),
       });
 
-      const data = await res.json();
+      const data = await response.json();
 
-      if (!res.ok) {
-        logger("CHECKOUT_BLOCKED", `Checkout blocked: ${data.error || "Safety rules violation"}`, "error");
+      if (!response.ok) {
+        logger("CHECKOUT_BLOCKED", `Gateway check failed: ${data.error}`, "error");
         setPaymentStep("failed");
         setBlockedPurchases((prev) => prev + 1);
         setMessages((prev) => [
           ...prev,
           {
             sender: "agent",
-            text: `❌ Checkout blocked: ${data.error || "Policy Engine rules violation."}`,
-            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+            text: `❌ Checkout Blocked: ${data.error}`,
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
           }
         ]);
         return;
       }
 
-      const { orderId, razorpayOrderId, amount, currency, keyId } = data;
-      setActiveOrderId(orderId);
-      setActiveRazorpayOrderId(razorpayOrderId);
-      logger("RAZORPAY_ORDER_CREATED", `Razorpay Order generated successfully. ID: ${razorpayOrderId}`, "success");
+      setActiveOrderId(data.orderId);
+      setActiveRazorpayOrderId(data.razorpayOrderId);
+      logger("ORDER_CREATED", `Internal order ID ${data.orderId} matches Razorpay ${data.razorpayOrderId}`, "success");
 
-      // Level 3 autonomous pre-authorization bypasses checkout window popup in tests
-      if (autonomous) {
-        logger("PAYMENT_AUTONOMOUS", "Autonomy Level 3: Auto-authorizing checkout payment", "info");
-        await verifyPaymentSignatureOnBackend(
-          orderId,
-          razorpayOrderId,
-          `pay_auto_${Math.random().toString(36).substring(2, 12)}`,
-          "valid_mock_signature"
-        );
-        return;
-      }
-
-      // For Level 2, try to open the official Razorpay Checkout widget
-      if (typeof window !== "undefined" && (window as any).Razorpay && keyId && keyId !== "rzp_test_placeholder") {
-        logger("PAYMENT_POPUP_OPEN", "Launching Razorpay secure payment checkout popup...", "info");
+      // Auto-trigger Razorpay sandbox modal
+      if ((window as any).Razorpay) {
         const options = {
-          key: keyId,
-          amount: amount,
-          currency: currency,
+          key: data.keyId,
+          amount: data.amount,
+          currency: data.currency,
           name: "AgentGuard Sandbox",
           description: `Payment for ${product.name}`,
-          order_id: razorpayOrderId,
+          order_id: data.razorpayOrderId,
           handler: async function (response: any) {
-            logger("PAYMENT_POPUP_SUCCESS", "Widget transaction complete. Forwarding to signature check...", "info");
             await verifyPaymentSignatureOnBackend(
-              orderId,
-              razorpayOrderId,
+              data.orderId,
+              data.razorpayOrderId,
               response.razorpay_payment_id,
               response.razorpay_signature
             );
           },
-          prefill: {
-            name: "Shopper",
-            email: "shopper@agentguard.ai",
-            contact: "9999999999",
-          },
-          theme: { color: "#4f46e5" },
           modal: {
             ondismiss: function () {
-              logger("PAYMENT_CANCELLED", "User closed the payment popup window.", "warning");
-              handleVerificationFailure("Payment cancelled by user.");
+              logger("PAYMENT_CANCELLED", "User cancelled sandbox checkout frame.", "warning");
+              setPaymentStep("failed");
             }
-          }
+          },
+          theme: { color: "#4f46e5" }
         };
         const rzp = new (window as any).Razorpay(options);
         rzp.open();
       } else {
-        logger("PAYMENT_SANDBOX_MOCK", "No credentials or script. Ready for manual mock action.", "info");
+        // Fallback for mock sandbox panel
+        logger("AWAITING_SANDBOX_ACTION", "Please authorize/fail transaction manually in sandbox controller.", "warning");
         setMessages((prev) => [
           ...prev,
           {
             sender: "agent",
-            text: `I have prepared the Order: ${razorpayOrderId}. Please authorize sandbox payment in the right shield panel.`,
+            text: `I have prepared the Order: ${data.razorpayOrderId}. Please authorize sandbox payment in the right sandbox controller.`,
             timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
           }
         ]);
@@ -551,6 +528,8 @@ export default function AgentGuardHome() {
             timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
           }
         ]);
+        fetchOrders();
+        fetchLiveCatalog();
       } else {
         handleVerificationFailure(data.error || "Payment verification failed.");
       }
@@ -576,6 +555,7 @@ export default function AgentGuardHome() {
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       }
     ]);
+    fetchOrders();
   };
 
   // Handle manual payment modal submission
@@ -585,54 +565,277 @@ export default function AgentGuardHome() {
     await verifyPaymentSignatureOnBackend(activeOrderId, activeRazorpayOrderId, mockPaymentId, mockSignature);
   };
 
+  // Run Demo Scenario
+  const runDemoScenario = async (scenarioId: number) => {
+    setIsProcessing(true);
+    setPaymentStep("none");
+    setActiveCheckoutProduct(null);
+    setAuditLogs([]);
+
+    try {
+      const response = await fetch("/api/demo/scenario", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scenarioId }),
+      });
+
+      if (response.ok) {
+        // Fetch fresh policy
+        const polRes = await fetch("/api/policy");
+        const polData = await polRes.json();
+        if (polData.success && polData.policy) {
+          setPolicyLimit(polData.policy.maxBudget);
+          setPolicyAutonomy(polData.policy.autonomyLevel);
+        }
+
+        fetchLiveCatalog();
+        fetchOrders();
+
+        if (scenarioId === 1) {
+          setMessages([
+            {
+              sender: "agent",
+              text: "Demo Mode activated: Scenario 1 - Perfect Match. Autonomy level set to 3. I will attempt to automatically buy the SwiftRun Trainer size 10.",
+              timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+            }
+          ]);
+          setTimeout(() => handleSendMessage("Buy the SwiftRun Blue Trainer, size 10."), 1000);
+        } else if (scenarioId === 2) {
+          setMessages([
+            {
+              sender: "agent",
+              text: "Demo Mode activated: Scenario 2 - Constraint Negotiation. Stock of the SwiftRun Blue Trainer set to 0. I will look for alternatives.",
+              timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+            }
+          ]);
+          setTimeout(() => handleSendMessage("Find blue running shoes size 10 under ₹2,000."), 1000);
+        } else if (scenarioId === 3) {
+          setMessages([
+            {
+              sender: "agent",
+              text: "Demo Mode activated: Scenario 3 - Safety Policy Block. I will attempt to buy shoes that cost ₹2,499 under a ₹2,000 policy budget cap.",
+              timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+            }
+          ]);
+          setTimeout(() => handleSendMessage("Buy the TrailBlazer Premium Runner, size 10."), 1000);
+        }
+      }
+    } catch (error) {
+      console.error("Failed to set up demo scenario:", error);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleResetDemo = async () => {
+    try {
+      const response = await fetch("/api/demo/reset", { method: "POST" });
+      if (response.ok) {
+        localStorage.removeItem("agentguard_sessionId");
+        window.location.reload();
+      }
+    } catch (error) {
+      console.error("Failed to reset database states:", error);
+    }
+  };
+
+  // Filter orders
+  const filteredOrders = orders.filter((o) => {
+    if (ordersFilter === "ALL") return true;
+    if (ordersFilter === "SUCCESSFUL") return o.status === "PAYMENT_CAPTURED" || o.status === "PAID";
+    if (ordersFilter === "FAILED") return o.status === "PAYMENT_FAILED" || o.status === "FAILED";
+    if (ordersFilter === "BLOCKED") return o.status === "CANCELLED" || o.status === "BLOCKED";
+    return true;
+  });
+
   return (
-    <div className="min-h-screen bg-[#09090b] text-[#f4f4f5] font-sans antialiased">
-      {/* Top Premium Nav */}
-      <header className="border-b border-[#27272a] bg-[#09090b]/80 backdrop-blur-md sticky top-0 z-50 px-6 py-4 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="bg-gradient-to-tr from-indigo-500 to-emerald-500 p-2 rounded-xl text-black">
-            <ShieldCheck className="h-6 w-6 text-white" />
+    <div className="min-h-screen bg-[#020205] text-[#f4f4f5] font-sans antialiased selection:bg-indigo-500/30 selection:text-indigo-200">
+      
+      {/* ABOVE-THE-FOLD PRESTIGE LANDING HERO */}
+      <section className="relative overflow-hidden border-b border-[#1f1f2e] bg-[radial-gradient(ellipse_80%_80%_at_50%_-20%,rgba(79,70,229,0.18),rgba(255,255,255,0))] pb-20 pt-16 px-6">
+        <div className="max-w-[1200px] mx-auto text-center space-y-6">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-indigo-500/30 bg-indigo-500/5 text-xs text-indigo-400 font-medium">
+            <Sparkles className="h-3.5 w-3.5" />
+            Phase 7: Live Agentic Commerce Trust Engine
           </div>
-          <div>
-            <h1 className="text-xl font-bold tracking-tight bg-gradient-to-r from-white via-zinc-200 to-zinc-400 bg-clip-text text-transparent">
-              AgentGuard
-            </h1>
-            <p className="text-xs text-[#a1a1aa]">
-              Secure AI-Agentic Commerce Platform
+          
+          <h1 className="text-5xl md:text-7xl font-extrabold tracking-tight bg-gradient-to-r from-white via-zinc-200 to-zinc-400 bg-clip-text text-transparent max-w-4xl mx-auto leading-none">
+            AGENTGUARD
+          </h1>
+          
+          <p className="text-xl md:text-2xl text-zinc-300 max-w-2xl mx-auto font-light leading-relaxed">
+            AI that can shop for you — without being allowed to spend beyond your rules.
+          </p>
+
+          <p className="text-sm text-[#a1a1aa] max-w-xl mx-auto">
+            Traditional shopping bots directly call APIs or bypass validation. AgentGuard inserts a deterministic trust validation pipeline that re-verifies pricing, stock, budget caps, and policies.
+          </p>
+
+          <div className="flex flex-wrap items-center justify-center gap-4 pt-4">
+            <button
+              onClick={scrollToSandbox}
+              className="bg-indigo-600 hover:bg-indigo-500 text-white font-semibold py-3 px-6 rounded-xl transition-all shadow-lg shadow-indigo-600/20 hover:scale-[1.02] flex items-center gap-2 text-sm"
+            >
+              Launch Sandbox Console
+              <ArrowRight className="h-4 w-4" />
+            </button>
+            
+            <button
+              onClick={() => {
+                scrollToSandbox();
+                setTimeout(() => runDemoScenario(2), 500);
+              }}
+              className="bg-[#18181b] border border-[#27272a] hover:bg-[#27272a] text-zinc-200 font-semibold py-3 px-6 rounded-xl transition-all text-sm"
+            >
+              Test Turn Negotiation
+            </button>
+          </div>
+
+          {/* Prestige Comparison Matrix */}
+          <div className="pt-16 max-w-4xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-6 text-left">
+            <div className="bg-[#09090b]/40 border border-[#1f1f2e] p-6 rounded-2xl space-y-3">
+              <span className="text-xs font-semibold text-[#71717a] uppercase tracking-wider block">Traditional Bot</span>
+              <p className="text-sm font-bold text-rose-400">User ➔ Chatbot ➔ Catalog</p>
+              <p className="text-xs text-[#a1a1aa] leading-relaxed">
+                Zero budget gating, zero autonomy protection. Conversational but zero trust context.
+              </p>
+            </div>
+            <div className="bg-[#09090b]/40 border border-[#1f1f2e] p-6 rounded-2xl space-y-3">
+              <span className="text-xs font-semibold text-[#71717a] uppercase tracking-wider block">Basic Commerce Agent</span>
+              <p className="text-sm font-bold text-amber-400">User ➔ AI Agent ➔ Payment</p>
+              <p className="text-xs text-[#a1a1aa] leading-relaxed">
+                LLM directly triggers checkout, making it vulnerable to prompt injection price tampering.
+              </p>
+            </div>
+            <div className="bg-indigo-950/20 border border-indigo-500/30 p-6 rounded-2xl space-y-3">
+              <div className="flex justify-between items-center">
+                <span className="text-xs font-semibold text-indigo-400 uppercase tracking-wider block">AgentGuard</span>
+                <span className="bg-indigo-500/20 text-indigo-400 text-[8px] font-mono px-1 rounded uppercase font-bold">Secure</span>
+              </div>
+              <p className="text-sm font-bold text-emerald-400">User ➔ AI ➔ Policy Guard ➔ Razorpay</p>
+              <p className="text-xs text-[#a1a1aa] leading-relaxed">
+                Deterministic validation rules enforce limits. The LLM never controls payment authorization.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* WHY CAN I TRUST THIS AGENT? */}
+      <section className="bg-[#09090b]/60 border-b border-[#1f1f2e] py-16 px-6">
+        <div className="max-w-[1200px] mx-auto space-y-10">
+          <div className="text-center space-y-2">
+            <h2 className="text-3xl font-extrabold tracking-tight text-white">Why Can I Trust This Agent?</h2>
+            <p className="text-sm text-[#a1a1aa] max-w-xl mx-auto">
+              AgentGuard implements a 10-layer trust security architecture designed to prevent payment exploits.
             </p>
           </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 text-xs">
+            <div className="bg-[#18181b]/30 border border-[#27272a] p-5 rounded-xl space-y-2">
+              <div className="h-8 w-8 bg-indigo-500/10 rounded-lg text-indigo-400 flex items-center justify-center font-bold">1</div>
+              <p className="font-semibold text-zinc-100">AI Recommends Only</p>
+              <p className="text-[#a1a1aa] leading-relaxed">AI acts as a researcher, suggesting best items but holds zero authority to checkout.</p>
+            </div>
+            <div className="bg-[#18181b]/30 border border-[#27272a] p-5 rounded-xl space-y-2">
+              <div className="h-8 w-8 bg-indigo-500/10 rounded-lg text-indigo-400 flex items-center justify-center font-bold">2</div>
+              <p className="font-semibold text-zinc-100">Deterministic Engine</p>
+              <p className="text-[#a1a1aa] leading-relaxed">Safety boundaries are parsed by non-LLM, rigid code logic which cannot be prompt-hacked.</p>
+            </div>
+            <div className="bg-[#18181b]/30 border border-[#27272a] p-5 rounded-xl space-y-2">
+              <div className="h-8 w-8 bg-indigo-500/10 rounded-lg text-indigo-400 flex items-center justify-center font-bold">3</div>
+              <p className="font-semibold text-zinc-100">Fresh Price Checks</p>
+              <p className="text-[#a1a1aa] leading-relaxed">Catalog price is re-verified from product DB at checkout, blocking client-side price updates.</p>
+            </div>
+            <div className="bg-[#18181b]/30 border border-[#27272a] p-5 rounded-xl space-y-2">
+              <div className="h-8 w-8 bg-indigo-500/10 rounded-lg text-indigo-400 flex items-center justify-center font-bold">4</div>
+              <p className="font-semibold text-zinc-100">Rigid Budget Limits</p>
+              <p className="text-[#a1a1aa] leading-relaxed">If the real order sum exceeds the policy budget, the transaction is hard-blocked instantly.</p>
+            </div>
+            <div className="bg-[#18181b]/30 border border-[#27272a] p-5 rounded-xl space-y-2">
+              <div className="h-8 w-8 bg-indigo-500/10 rounded-lg text-indigo-400 flex items-center justify-center font-bold">5</div>
+              <p className="font-semibold text-zinc-100">Inventory Verification</p>
+              <p className="text-[#a1a1aa] leading-relaxed">Inventory levels are verified atomically before creating a Razorpay transaction ticket.</p>
+            </div>
+            <div className="bg-[#18181b]/30 border border-[#27272a] p-5 rounded-xl space-y-2">
+              <div className="h-8 w-8 bg-indigo-500/10 rounded-lg text-indigo-400 flex items-center justify-center font-bold">6</div>
+              <p className="font-semibold text-zinc-100">Merchant Allowlists</p>
+              <p className="text-[#a1a1aa] leading-relaxed">Restricts vendor search and payments to whitelisted commercial partners.</p>
+            </div>
+            <div className="bg-[#18181b]/30 border border-[#27272a] p-5 rounded-xl space-y-2">
+              <div className="h-8 w-8 bg-indigo-500/10 rounded-lg text-indigo-400 flex items-center justify-center font-bold">7</div>
+              <p className="font-semibold text-zinc-100">Signature Verification</p>
+              <p className="text-[#a1a1aa] leading-relaxed">All checkouts calculate an server-side HMAC-SHA256 signature to verify receipt.</p>
+            </div>
+            <div className="bg-[#18181b]/30 border border-[#27272a] p-5 rounded-xl space-y-2">
+              <div className="h-8 w-8 bg-indigo-500/10 rounded-lg text-indigo-400 flex items-center justify-center font-bold">8</div>
+              <p className="font-semibold text-zinc-100">Idempotent Webhooks</p>
+              <p className="text-[#a1a1aa] leading-relaxed">Webhook deliveries execute under database locks, preventing double payment state capture.</p>
+            </div>
+            <div className="bg-[#18181b]/30 border border-[#27272a] p-5 rounded-xl space-y-2">
+              <div className="h-8 w-8 bg-indigo-500/10 rounded-lg text-indigo-400 flex items-center justify-center font-bold">9</div>
+              <p className="font-semibold text-zinc-100">Audit timeline logs</p>
+              <p className="text-[#a1a1aa] leading-relaxed">Every transaction audit trace is written to database logs, leaving an immutable history.</p>
+            </div>
+            <div className="bg-[#18181b]/30 border border-[#27272a] p-5 rounded-xl space-y-2">
+              <div className="h-8 w-8 bg-indigo-500/10 rounded-lg text-indigo-400 flex items-center justify-center font-bold">10</div>
+              <p className="font-semibold text-zinc-100">Database Freshness</p>
+              <p className="text-[#a1a1aa] leading-relaxed">Checkout aborts immediately if db status is offline, preventing unverified transactions.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* CORE SANDBOX APPLICATION */}
+      <section ref={sandboxRef} className="max-w-[1600px] mx-auto p-6 space-y-6 scroll-mt-20">
+        
+        {/* TOP STATUS CONTROL HEADER */}
+        <div className="flex flex-wrap items-center justify-between gap-4 bg-[#18181b]/30 border border-[#27272a] p-4 rounded-2xl">
+          <div className="flex items-center gap-3">
+            <div className="bg-indigo-600/10 p-2 rounded-xl text-indigo-400">
+              <Sliders className="h-5 w-5" />
+            </div>
+            <div>
+              <h2 className="text-base font-bold text-white">AgentGuard Control Console</h2>
+              <p className="text-xs text-[#a1a1aa]">Sandbox simulation panel with hot-reload states</p>
+            </div>
+          </div>
+
+          {/* Health Status Badges */}
+          <div className="flex flex-wrap items-center gap-3 text-xs">
+            <Link
+              href="/dashboard"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-medium transition-colors"
+            >
+              <BarChart3 className="h-3.5 w-3.5" />
+              <span>Admin Console</span>
+            </Link>
+            
+            <button
+              onClick={handleResetDemo}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-rose-950/30 hover:bg-rose-900/40 text-rose-400 border border-rose-500/20 font-medium transition-colors"
+            >
+              <RefreshCw className="h-3.5 w-3.5" />
+              <span>Reset Sandbox DB</span>
+            </button>
+            
+            <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-[#09090b] border border-[#27272a]">
+              <Database className="h-3.5 w-3.5 text-emerald-400" />
+              <span>DB Connection: {apiHealth?.database === "connected" ? "PostgreSQL" : "Local Mock Sandbox"}</span>
+            </div>
+            
+            <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-[#09090b] border border-[#27272a]">
+              <Bot className="h-3.5 w-3.5 text-purple-400" />
+              <span>Parser: {apiHealth?.mockMode?.gemini ? "Local Fallback" : "Gemini API Active"}</span>
+            </div>
+          </div>
         </div>
 
-        {/* Health status badges */}
-        <div className="flex items-center gap-3 text-xs">
-          <Link
-            href="/dashboard"
-            className="flex items-center gap-1.5 px-3 py-1.5 mr-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-medium transition-colors"
-          >
-            <BarChart3 className="h-3.5 w-3.5" />
-            <span>Admin Console</span>
-          </Link>
-          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#18181b] border border-[#27272a]">
-            <Database className="h-3 w-3 text-emerald-400" />
-            <span>DB Pool: {apiHealth?.database === "connected" ? "PostgreSQL Connected" : "Local Mock Sandbox"}</span>
-          </div>
-          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#18181b] border border-[#27272a]">
-            <Bot className="h-3 w-3 text-purple-400" />
-            <span>AI: {apiHealth?.mockMode?.gemini ? "MOCK Mode" : "Gemini API Live"}</span>
-          </div>
-          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#18181b] border border-[#27272a]">
-            <div className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse"></div>
-            <span>Health Status: ONLINE</span>
-          </div>
-        </div>
-      </header>
-
-      <main className="max-w-[1600px] mx-auto p-6 space-y-6">
-        {/* Core Stats Row */}
+        {/* STATS OVERVIEW */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <div className="bg-[#18181b]/50 border border-[#27272a] p-5 rounded-2xl flex items-center justify-between">
             <div>
-              <p className="text-xs font-medium text-[#a1a1aa] uppercase tracking-wider">Total Shopping Requests</p>
+              <p className="text-xs font-medium text-[#a1a1aa] uppercase tracking-wider">Total Sandbox Interactions</p>
               <h3 className="text-2xl font-bold mt-1 text-white">{totalRequests}</h3>
             </div>
             <div className="bg-indigo-500/10 p-3 rounded-xl text-indigo-400">
@@ -650,7 +853,7 @@ export default function AgentGuardHome() {
           </div>
           <div className="bg-[#18181b]/50 border border-[#27272a] p-5 rounded-2xl flex items-center justify-between">
             <div>
-              <p className="text-xs font-medium text-[#a1a1aa] uppercase tracking-wider">Policy Blocked Attempts</p>
+              <p className="text-xs font-medium text-[#a1a1aa] uppercase tracking-wider">Safety Engine Blocks</p>
               <h3 className="text-2xl font-bold mt-1 text-rose-500">{blockedPurchases}</h3>
             </div>
             <div className="bg-rose-500/10 p-3 rounded-xl text-rose-400">
@@ -659,35 +862,74 @@ export default function AgentGuardHome() {
           </div>
           <div className="bg-[#18181b]/50 border border-[#27272a] p-5 rounded-2xl flex items-center justify-between">
             <div>
-              <p className="text-xs font-medium text-[#a1a1aa] uppercase tracking-wider">Avg Decision Latency</p>
-              <h3 className="text-2xl font-bold mt-1 text-white">1.8s</h3>
+              <p className="text-xs font-medium text-[#a1a1aa] uppercase tracking-wider">Turn State Persistence</p>
+              <h3 className="text-2xl font-bold mt-1 text-white">Survives Refresh</h3>
             </div>
-            <div className="bg-amber-500/10 p-3 rounded-xl text-amber-400">
-              <RefreshCw className="h-5 w-5 animate-spin" style={{ animationDuration: '6s' }} />
+            <div className="bg-indigo-500/10 p-3 rounded-xl text-indigo-400">
+              <UserCheck className="h-5 w-5" />
             </div>
           </div>
         </div>
 
-        {/* Triple Panel Layout */}
+        {/* DEMO MODE CONTROL TABS */}
+        <div className="bg-[#18181b]/50 border border-[#27272a] p-5 rounded-2xl space-y-3">
+          <h3 className="text-sm font-semibold text-white">Live Competition Scenarios</h3>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <button
+              onClick={() => runDemoScenario(1)}
+              className="bg-[#09090b] border border-indigo-500/30 hover:border-indigo-500/70 p-4 rounded-xl text-left transition-all space-y-1 hover:scale-[1.01]"
+            >
+              <div className="flex justify-between items-center text-xs font-semibold text-indigo-400">
+                <span>Scenario 1: Perfect Match</span>
+                <span className="text-[10px] bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded font-mono uppercase">Lvl 3</span>
+              </div>
+              <p className="text-xs font-medium text-white">"Buy the SwiftRun Blue Trainer, size 10"</p>
+              <p className="text-[10px] text-[#a1a1aa]">Satisfies budget cap (1899 &lt; 2000), whitelists category/merchant, policy ALLOWS automatically.</p>
+            </button>
+            <button
+              onClick={() => runDemoScenario(2)}
+              className="bg-[#09090b] border border-indigo-500/30 hover:border-indigo-500/70 p-4 rounded-xl text-left transition-all space-y-1 hover:scale-[1.01]"
+            >
+              <div className="flex justify-between items-center text-xs font-semibold text-indigo-400">
+                <span>Scenario 2: Constraint Negotiation</span>
+                <span className="text-[10px] bg-amber-500/20 text-amber-400 px-1.5 py-0.5 rounded font-mono uppercase">Lvl 2</span>
+              </div>
+              <p className="text-xs font-medium text-white">"Find blue running shoes size 10 under ₹2,000"</p>
+              <p className="text-[10px] text-[#a1a1aa]">Matches no exact item (stock = 0). Computes 3 safe alternatives and triggers relaxation buttons.</p>
+            </button>
+            <button
+              onClick={() => runDemoScenario(3)}
+              className="bg-[#09090b] border border-indigo-500/30 hover:border-indigo-500/70 p-4 rounded-xl text-left transition-all space-y-1 hover:scale-[1.01]"
+            >
+              <div className="flex justify-between items-center text-xs font-semibold text-indigo-400">
+                <span>Scenario 3: Safety Block</span>
+                <span className="text-[10px] bg-rose-500/20 text-rose-400 px-1.5 py-0.5 rounded font-mono uppercase">Lvl 3</span>
+              </div>
+              <p className="text-xs font-medium text-white">"Buy TrailBlazer Premium Runner, size 10"</p>
+              <p className="text-[10px] text-[#a1a1aa]">Matches premium shoe at ₹2,499. The policy limits budget to ₹2,000. Safety engine BLOCKS checkout.</p>
+            </button>
+          </div>
+        </div>
+
+        {/* 3-COLUMN TRIPLE PANEL LAYOUT */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
           
-          {/* Column 1: AI Buyer Chat Hub (Span 5) */}
-          <div className="lg:col-span-5 flex flex-col bg-[#18181b]/30 border border-[#27272a] rounded-2xl overflow-hidden h-[620px]">
-            {/* Header */}
+          {/* COLUMN 1: AI Buyer Chat Hub & Timeline (col-span-4) */}
+          <div className="lg:col-span-4 flex flex-col bg-[#18181b]/30 border border-[#27272a] rounded-2xl overflow-hidden h-[620px]">
             <div className="px-4 py-3 bg-[#18181b]/60 border-b border-[#27272a] flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Bot className="h-4 w-4 text-indigo-400" />
                 <span className="text-sm font-semibold">AI Buyer Agent Chat</span>
               </div>
-              <span className="text-xs text-indigo-400 font-mono">Autonomy Level: {policyAutonomy}</span>
+              <span className="text-xs text-indigo-400 font-mono">Session: {sessionId.substring(0, 12)}...</span>
             </div>
 
-            {/* Chat Body */}
+            {/* Chat Messages */}
             <div className="flex-1 overflow-y-auto p-4 space-y-4">
               {messages.map((msg, index) => (
                 <div
                   key={index}
-                  className={`flex gap-3 max-w-[85%] ${
+                  className={`flex gap-3 max-w-[90%] ${
                     msg.sender === "user" ? "ml-auto flex-row-reverse" : ""
                   }`}
                 >
@@ -701,7 +943,7 @@ export default function AgentGuardHome() {
                     {msg.sender === "user" ? <User className="h-4 w-4" /> : <Bot className="h-4 w-4" />}
                   </div>
 
-                  <div className="space-y-2">
+                  <div className="space-y-2 flex-1">
                     <div
                       className={`rounded-2xl px-4 py-2.5 text-sm ${
                         msg.sender === "user"
@@ -712,166 +954,147 @@ export default function AgentGuardHome() {
                       {msg.text}
                     </div>
 
-                    {/* Render Special Cards */}
+                    {/* RENDER SPECIAL PRODUCT CARDS */}
                     {msg.type === "product-card" && msg.data && (
-                      <div className="bg-[#1e1e24] border border-indigo-500/30 rounded-xl p-4 space-y-3 mt-2">
+                      <div className="bg-[#111115] border border-indigo-500/30 rounded-xl p-4 space-y-3 mt-2 shadow-lg">
                         <div className="flex items-start justify-between">
                           <div>
-                            <span className="text-xs text-[#a1a1aa] bg-[#27272a] px-2 py-0.5 rounded">
+                            <span className="text-[10px] text-indigo-400 bg-indigo-500/10 px-2 py-0.5 rounded uppercase font-bold tracking-wider">
                               {msg.data.product.merchantName}
                             </span>
-                            <h4 className="font-semibold text-white mt-1">{msg.data.product.name}</h4>
+                            <h4 className="font-semibold text-white mt-1.5">{msg.data.product.name}</h4>
                           </div>
                           <span className="text-emerald-400 font-bold">{formatINR(msg.data.product.price)}</span>
                         </div>
-                        <div className="grid grid-cols-2 gap-2 text-xs text-[#a1a1aa]">
-                          <div>Size: <span className="text-white font-medium">{msg.data.size}</span></div>
+                        
+                        <div className="grid grid-cols-2 gap-2 text-[11px] text-[#a1a1aa] border-t border-[#27272a] pt-2">
+                          <div>Requested Size: <span className="text-white font-medium">{msg.data.size}</span></div>
                           <div>Color: <span className="text-white font-medium capitalize">{msg.data.color}</span></div>
-                          <div>Return: <span className="text-white font-medium">{msg.data.product.returnDays} Days</span></div>
-                          <div>Stock: <span className="text-emerald-400 font-medium">In Stock ({msg.data.product.stock})</span></div>
+                          <div>Return Window: <span className="text-white font-medium">{msg.data.product.returnDays} Days</span></div>
+                          <div>Stock Freshness: <span className="text-emerald-400 font-medium">Available ({msg.data.product.stock})</span></div>
                         </div>
 
-                        {/* Why I chose this block */}
-                        <div className="bg-[#09090b]/40 border border-[#27272a] rounded-xl p-3 mt-2 space-y-1.5 text-xs text-[#a1a1aa]">
-                          <p className="font-semibold text-white text-[10px] uppercase tracking-wider pb-1 border-b border-[#27272a]">Why I Recommend This</p>
-                          <div className="space-y-1 text-[10px]">
-                            <div className="flex items-center gap-1.5 text-emerald-400">
-                              <span>✓</span> <span>Matches size requirement ({msg.data.size})</span>
-                            </div>
-                            <div className="flex items-center gap-1.5 text-emerald-400">
-                              <span>✓</span> <span>Within maximum budget cap ({formatINR(policyLimit)})</span>
-                            </div>
-                            {sessionIntent?.color?.value && msg.data.product.color.toLowerCase() === sessionIntent.color.value.toLowerCase() && (
-                              <div className="flex items-center gap-1.5 text-emerald-400">
-                                <span>✓</span> <span>Matches color preference ({msg.data.product.color})</span>
-                              </div>
-                            )}
-                            <div className="flex items-center gap-1.5 text-emerald-400">
-                              <span>✓</span> <span>In stock at {msg.data.product.merchantName}</span>
-                            </div>
-                            <div className="flex items-center gap-1.5 text-[#71717a]">
-                              <span>✓</span> <span>Determined as the best match with rank score: {Math.round(1000 - msg.data.product.price / 10 + msg.data.product.rating * 30 - msg.data.product.shippingDays * 15)}</span>
-                            </div>
+                        {/* WHY CHOSE CARD */}
+                        <div className="bg-[#09090b]/40 border border-[#27272a] rounded-lg p-2.5 text-[10px] text-[#a1a1aa] space-y-1">
+                          <p className="font-semibold text-white uppercase tracking-wider text-[8px] pb-1 border-b border-[#27272a]">Trust Reasoning Trace</p>
+                          <div className="flex items-center gap-1.5 text-emerald-400 mt-1">
+                            <Check className="h-3 w-3" />
+                            <span>Matches requested size ({msg.data.size})</span>
+                          </div>
+                          <div className="flex items-center gap-1.5 text-emerald-400">
+                            <Check className="h-3 w-3" />
+                            <span>Fits max budget rule ({formatINR(policyLimit)})</span>
+                          </div>
+                          <div className="flex items-center gap-1.5 text-[#71717a]">
+                            <Check className="h-3 w-3" />
+                            <span>Best ranking score: {Math.round(1000 - msg.data.product.price / 10 + msg.data.product.rating * 30 - msg.data.product.shippingDays * 15)}</span>
                           </div>
                         </div>
 
-                        {/* Merchant comparison option cards */}
-                        {msg.data.products && msg.data.products.length > 1 && (
-                          <div className="bg-[#09090b]/40 border border-[#27272a]/60 rounded-xl p-3 mt-2 space-y-2 text-xs">
-                            <p className="font-semibold text-white text-[10px] uppercase tracking-wider pb-1 border-b border-[#27272a]">Merchant Options Compared</p>
-                            <div className="space-y-2">
-                              {msg.data.products.map((p: any, pidx: number) => (
-                                <div key={pidx} className={`p-2 rounded-lg border ${pidx === 0 ? "border-indigo-500/30 bg-indigo-500/5" : "border-[#27272a]"} flex justify-between items-center text-[10px]`}>
-                                  <div>
-                                    <p className="font-semibold text-white">{p.merchantName} {pidx === 0 && <span className="text-[8px] bg-indigo-500/20 text-indigo-400 px-1 py-0.5 rounded ml-1 font-mono uppercase font-bold">RECOMMENDED</span>}</p>
-                                    <p className="text-[#a1a1aa] mt-0.5">{p.shippingDays}d shipping | {p.rating}★ Rating</p>
-                                  </div>
-                                  <p className="font-bold text-white">{formatINR(p.price)}</p>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-
-                        {/* Purchase Safety Check list */}
+                        {/* SAFETY CHECKS GRID */}
                         {msg.data.policyResult && (
-                          <div className="bg-[#09090b]/60 border border-[#27272a]/80 rounded-lg p-3 space-y-2 mt-2">
-                            <p className="text-[10px] font-bold text-[#a1a1aa] border-b border-[#27272a] pb-1 uppercase tracking-wider">Purchase Safety Check</p>
-                            <div className="space-y-1.5 text-[10px]">
+                          <div className="bg-[#09090b]/60 border border-[#27272a]/80 rounded-lg p-2.5 space-y-1.5">
+                            <p className="text-[8px] font-bold text-[#a1a1aa] border-b border-[#27272a] pb-1 uppercase tracking-wider">Policy Engine Verification</p>
+                            <div className="space-y-1 text-[10px]">
                               {msg.data.policyResult.checks.map((chk: any, cidx: number) => (
                                 <div key={cidx} className="flex justify-between items-center">
-                                  <span className="text-[#71717a] capitalize">{chk.name === "priceChange" ? "price protection" : chk.name}</span>
-                                  <div className="flex items-center gap-1">
-                                    {chk.name === "budget" && (
-                                      <span className="text-[9px] text-[#a1a1aa] font-mono mr-1">₹{chk.actual} / ₹{chk.expected}</span>
-                                    )}
-                                    <span className={chk.passed ? "text-emerald-400 font-medium" : "text-rose-400 font-medium"}>
-                                      {chk.passed ? "✓ Passed" : "❌ Failed"}
-                                    </span>
-                                  </div>
+                                  <span className="text-[#71717a] capitalize">{chk.name}</span>
+                                  <span className={chk.passed ? "text-emerald-400 font-medium" : "text-rose-400 font-medium"}>
+                                    {chk.passed ? "✓ Valid" : "❌ Blocked"}
+                                  </span>
                                 </div>
                               ))}
                             </div>
-                            <div className="border-t border-[#27272a] pt-1.5 mt-1 flex justify-between items-center text-[10px]">
-                              <span className="text-[#a1a1aa] font-medium">Final Decision:</span>
-                              <span className={`font-bold ${msg.data.policyResult.decision === "ALLOW" ? "text-emerald-400" : msg.data.policyResult.decision === "BLOCK" ? "text-rose-400" : "text-amber-400"}`}>
-                                {msg.data.policyResult.decision === "ALLOW" ? "✓ APPROVED FOR CHECKOUT" : msg.data.policyResult.decision === "BLOCK" ? "❌ BLOCKED" : "⚠ CONFIRMATION REQUIRED"}
+                            <div className="border-t border-[#27272a] pt-1.5 mt-1 flex justify-between items-center text-[10px] font-bold">
+                              <span className="text-[#a1a1aa]">Final Gate Decision:</span>
+                              <span className={msg.data.policyResult.decision === "ALLOW" ? "text-emerald-400" : msg.data.policyResult.decision === "BLOCK" ? "text-rose-400" : "text-amber-400"}>
+                                {msg.data.policyResult.decision === "ALLOW" ? "✓ ALLOW" : msg.data.policyResult.decision === "BLOCK" ? "❌ BLOCK" : "⚠ ASK_USER"}
                               </span>
                             </div>
                           </div>
                         )}
 
-                        {/* Show button only if decision is not ALLOW and not BLOCK */}
-                        {msg.data.policyResult?.decision !== "ALLOW" && msg.data.policyResult?.decision !== "BLOCK" && (
+                        {/* RENDER ACTIONS */}
+                        {msg.data.policyResult?.decision === "ASK_USER" && (
                           <button
-                            onClick={() => triggerPaymentOrder(msg.data.product)}
-                            className="w-full bg-emerald-500 hover:bg-emerald-600 text-white py-1.5 px-3 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors"
+                            onClick={() => triggerPaymentOrder(msg.data.product, null, true)}
+                            className="w-full bg-amber-500 hover:bg-amber-600 text-black py-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-all"
                           >
-                            <CreditCard className="h-3.5 w-3.5" />
-                            Authorize Purchase
+                            <UserCheck className="h-3.5 w-3.5" />
+                            Confirm & Authorize Order
                           </button>
                         )}
 
-                        {/* Show automatic checkout notification if ALLOW */}
                         {msg.data.policyResult?.decision === "ALLOW" && (
                           <button
-                            onClick={() => triggerPaymentOrder(msg.data.product, null, true)}
-                            className="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-1.5 px-3 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors"
+                            onClick={() => triggerPaymentOrder(msg.data.product)}
+                            className="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 transition-all"
                           >
-                            <CheckCircle className="h-3.5 w-3.5" />
-                            Auto-Approved: Complete Sandbox Checkout
+                            <CreditCard className="h-3.5 w-3.5" />
+                            Initiate Payment Checkout
                           </button>
+                        )}
+
+                        {msg.data.policyResult?.decision === "BLOCK" && (
+                          <div className="bg-rose-500/10 border border-rose-500/20 text-rose-400 p-3 rounded-lg text-[10px]">
+                            <p className="font-bold">❌ GATED BLOCK ACTION</p>
+                            <p className="mt-1 text-[#a1a1aa]">{msg.data.policyResult.reason}</p>
+                            <button
+                              onClick={() => handleSendMessage("Show all options")}
+                              className="mt-2 bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 font-semibold px-2 py-1 rounded transition-colors"
+                            >
+                              Relax requirements
+                            </button>
+                          </div>
                         )}
                       </div>
                     )}
 
+                    {/* RENDER ALTERNATIVES NEGOTIATION CARD */}
                     {msg.type === "alternatives-card" && msg.data && (
-                      <div className="space-y-2.5 mt-2">
-                        <div className="bg-rose-500/5 border border-rose-500/20 rounded-xl p-3 text-xs text-[#a1a1aa] leading-relaxed">
-                          <p className="font-semibold text-rose-400 mb-1">⚠️ Exact Match Unavailable</p>
-                          <p className="text-[10px]">No products in stock match all constraints. Review the closest options below and select which criteria you would like to relax.</p>
+                      <div className="space-y-2 mt-2">
+                        <div className="bg-rose-950/20 border border-rose-500/20 rounded-xl p-3 text-xs text-[#a1a1aa] leading-relaxed">
+                          <p className="font-semibold text-rose-400 mb-1">⚠️ Exact Match Mismatch</p>
+                          <p className="text-[10px]">No catalog shoes match all constraints. Review alternatives and select relaxation choice:</p>
                         </div>
+                        
                         {msg.data.alternatives.map((alt: any, idx: number) => {
                           const isBudget = alt.violatedConstraint === "budget";
                           const isSize = alt.violatedConstraint === "size";
                           const isColor = alt.violatedConstraint === "color";
                           
-                          let relaxationText = "Relax preference";
+                          let relaxationText = "Relax constraint";
                           let command = `Select option: ${alt.product.name}`;
                           
                           if (isBudget) {
-                            relaxationText = `Allow ₹${alt.difference} increase`;
-                            command = `budget can go up to ${alt.product.price}`;
+                            relaxationText = `Allow ₹${alt.difference} budget increase`;
+                            command = `increase budget to ${alt.product.price}`;
                           } else if (isSize) {
-                            relaxationText = `Allow size ${alt.product.sizes[0] || "flexible"}`;
+                            relaxationText = `Allow size ${alt.product.sizes[0] || 9.5}`;
                             command = `size ${alt.product.sizes[0] || 9.5} is okay`;
                           } else if (isColor) {
-                            relaxationText = "Color doesn't matter";
-                            command = "color doesn't matter";
+                            relaxationText = `Allow different color (${alt.product.color})`;
+                            command = `color doesn't matter`;
                           }
 
                           return (
-                            <div
-                              key={idx}
-                              className="bg-[#1e1e24] border border-[#27272a] hover:border-indigo-500/20 rounded-xl p-3 flex flex-col gap-2 transition-all"
-                            >
+                            <div key={idx} className="bg-[#111115] border border-[#27272a] rounded-xl p-3 flex flex-col gap-2 hover:border-[#3f3f46] transition-all">
                               <div className="flex items-center justify-between text-xs">
                                 <div>
                                   <p className="font-medium text-white">{alt.product.name}</p>
-                                  <p className="text-[10px] text-zinc-400 mt-0.5">
-                                    Merchant: {alt.product.merchantName} | Rating: {alt.product.rating}★
+                                  <p className="text-[10px] text-[#71717a]">
+                                    {alt.product.merchantName} | Rating: {alt.product.rating}★
                                   </p>
                                 </div>
                                 <p className="font-bold text-white">{formatINR(alt.product.price)}</p>
                               </div>
-                              
                               <div className="flex items-center justify-between border-t border-[#27272a] pt-2 mt-1">
-                                <span className="text-[10px] text-rose-400 font-medium">
+                                <span className="text-[10px] text-rose-400 font-medium leading-none">
                                   {alt.explanation}
                                 </span>
                                 <button
                                   onClick={() => handleSendMessage(command)}
-                                  className="bg-indigo-600 hover:bg-indigo-700 text-white px-2.5 py-1 rounded text-[9px] font-semibold transition-colors"
+                                  className="bg-indigo-600 hover:bg-indigo-500 text-white px-2.5 py-1 rounded text-[10px] font-semibold transition-colors"
                                 >
                                   {relaxationText}
                                 </button>
@@ -879,6 +1102,13 @@ export default function AgentGuardHome() {
                             </div>
                           );
                         })}
+
+                        <button
+                          onClick={() => handleSendMessage("Show all options")}
+                          className="w-full bg-[#18181b] border border-[#27272a] hover:bg-[#27272a] text-zinc-300 py-1.5 rounded-lg text-xs font-semibold transition-colors mt-2"
+                        >
+                          Show all catalog items
+                        </button>
                       </div>
                     )}
 
@@ -888,6 +1118,7 @@ export default function AgentGuardHome() {
                   </div>
                 </div>
               ))}
+              
               {isProcessing && (
                 <div className="flex gap-3 max-w-[85%]">
                   <div className="h-8 w-8 rounded-full bg-indigo-600 flex items-center justify-center shrink-0 animate-pulse">
@@ -902,77 +1133,51 @@ export default function AgentGuardHome() {
               <div ref={chatEndRef} />
             </div>
 
-            {/* Suggestions Quick Buttons */}
-            <div className="px-4 py-2 border-t border-[#27272a]/40 bg-[#18181b]/10 space-y-1.5">
-              <span className="text-[10px] text-[#71717a] font-medium uppercase tracking-wider block">Quick Templates</span>
-              <div className="flex flex-wrap gap-1.5 max-h-[70px] overflow-y-auto">
-                <button
-                  onClick={() => applyTemplate("Buy me blue running shoes, size 10, under ₹2,000")}
-                  className="bg-[#27272a]/50 hover:bg-[#27272a] text-[#d4d4d8] border border-[#3f3f46]/30 text-[10px] py-1 px-2 rounded-full transition-colors truncate max-w-[200px]"
-                >
-                  Exact Match: Blue Runner under ₹2k
-                </button>
-                <button
-                  onClick={() => applyTemplate("I need size 10 shoes under 2k. Color doesn't matter.")}
-                  className="bg-[#27272a]/50 hover:bg-[#27272a] text-[#d4d4d8] border border-[#3f3f46]/30 text-[10px] py-1 px-2 rounded-full transition-colors truncate max-w-[200px]"
-                >
-                  Relaxed color match
-                </button>
-                <button
-                  onClick={() => applyTemplate("Buy me a shoe under ₹3,000")}
-                  className="bg-[#27272a]/50 hover:bg-[#27272a] text-[#d4d4d8] border border-[#3f3f46]/30 text-[10px] py-1 px-2 rounded-full transition-colors truncate max-w-[200px]"
-                >
-                  Incomplete: Shoe without size
-                </button>
-                <button
-                  onClick={() => applyTemplate("Buy me a black quartz watch, size 10, under 4k")}
-                  className="bg-[#27272a]/50 hover:bg-[#27272a] text-[#d4d4d8] border border-[#3f3f46]/30 text-[10px] py-1 px-2 rounded-full transition-colors truncate max-w-[200px]"
-                >
-                  Policy Block: Watch (Category mismatch)
-                </button>
-              </div>
-            </div>
-
-            {/* Input form */}
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                handleSendMessage();
-              }}
-              className="p-3 border-t border-[#27272a] bg-[#18181b]/50 flex gap-2"
-            >
+            {/* Chat Input */}
+            <div className="p-4 bg-[#18181b]/40 border-t border-[#27272a] flex gap-2">
               <input
                 type="text"
+                placeholder="Ask agent: e.g. Buy blue trainers size 10..."
                 value={inputMessage}
                 onChange={(e) => setInputMessage(e.target.value)}
-                placeholder="Ask the AI Buyer Agent to search and buy..."
-                className="flex-1 bg-[#09090b] border border-[#27272a] rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-indigo-500/80 transition-colors placeholder-[#71717a]"
+                onKeyDown={(e) => e.key === "Enter" && handleSendMessage()}
+                disabled={isProcessing}
+                className="flex-1 bg-[#09090b] border border-[#27272a] rounded-xl px-4 py-2 text-sm text-white focus:outline-none focus:border-indigo-500 focus:ring-0 disabled:text-[#71717a]"
               />
               <button
-                type="submit"
+                onClick={() => handleSendMessage()}
                 disabled={isProcessing || !inputMessage.trim()}
-                className="bg-indigo-600 hover:bg-indigo-700 disabled:bg-[#27272a] disabled:text-[#71717a] text-white px-4 py-2 rounded-xl text-xs font-semibold transition-colors flex items-center gap-1"
+                className="bg-indigo-600 hover:bg-indigo-500 disabled:bg-[#27272a] disabled:text-[#71717a] text-white px-4 py-2 rounded-xl text-xs font-semibold transition-colors flex items-center gap-1.5"
               >
                 <Play className="h-3 w-3 fill-current" />
                 Run
               </button>
-            </form>
+            </div>
           </div>
 
-          {/* Column 2: Safety Policy Shield & Catalog (Span 4) */}
+          {/* COLUMN 2: Policy Control Center & Intent status (col-span-4) */}
           <div className="lg:col-span-4 flex flex-col gap-6">
             
-            {/* Policy Shield Config */}
+            {/* POLICY SHIELD PANEL */}
             <div className="bg-[#18181b]/30 border border-[#27272a] rounded-2xl p-5 space-y-4">
-              <div className="flex items-center gap-2 pb-2 border-b border-[#27272a]">
-                <Sliders className="h-4.5 w-4.5 text-indigo-400" />
-                <h3 className="text-sm font-semibold text-white">Safety & Autonomy Policy</h3>
+              <div className="flex items-center justify-between pb-2 border-b border-[#27272a]">
+                <div className="flex items-center gap-2">
+                  <Sliders className="h-4.5 w-4.5 text-indigo-400" />
+                  <h3 className="text-sm font-semibold text-white">MY SHOPPING POLICY</h3>
+                </div>
+                <span className="text-[9px] bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-1.5 py-0.5 rounded font-mono uppercase">
+                  Verified Gate
+                </span>
               </div>
 
               <div className="space-y-4 text-xs">
                 {/* Autonomy Level */}
-                <div className="space-y-1.5">
-                  <label className="text-[#a1a1aa] block font-medium">Autonomy Authorization Level</label>
+                <div className="space-y-2">
+                  <div className="flex justify-between">
+                    <label className="text-[#a1a1aa] font-medium">Autonomy Gating Level</label>
+                    <span className="text-indigo-400 font-bold font-mono">LEVEL {policyAutonomy}</span>
+                  </div>
+                  
                   <div className="grid grid-cols-3 gap-1 bg-[#09090b] p-1 rounded-xl border border-[#27272a]">
                     {[1, 2, 3].map((lvl) => (
                       <button
@@ -980,16 +1185,6 @@ export default function AgentGuardHome() {
                         onClick={() => {
                           setPolicyAutonomy(lvl);
                           savePolicyToBackend(policyLimit, lvl, allowedCategories, allowedMerchants, allowedPaymentMethods);
-                          const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-                          setAuditLogs((prev) => [
-                            {
-                              step: "POLICY_CHANGE",
-                              message: `Autonomy level adjusted manually to Level ${lvl}`,
-                              status: "info",
-                              time
-                            },
-                            ...prev
-                          ]);
                         }}
                         className={`py-1.5 rounded-lg font-medium text-[10px] text-center transition-all ${
                           policyAutonomy === lvl
@@ -998,18 +1193,24 @@ export default function AgentGuardHome() {
                         }`}
                       >
                         Lvl {lvl}
-                        <span className="block text-[8px] font-normal">
+                        <span className="block text-[8px] font-normal uppercase mt-0.5">
                           {lvl === 1 ? "Recommend" : lvl === 2 ? "Prepare" : "Autonomous"}
                         </span>
                       </button>
                     ))}
                   </div>
+
+                  <p className="text-[10px] text-[#71717a] leading-relaxed italic bg-[#09090b]/40 p-2 rounded-lg border border-[#27272a]/65">
+                    {policyAutonomy === 1 && "Level 1: No payment authorized. Only product research is shown."}
+                    {policyAutonomy === 2 && "Level 2: Cart checkout can be prepared, but user confirmation click is required."}
+                    {policyAutonomy === 3 && "Level 3: Autopurchase. Agent completes payment only if every policy rules pass."}
+                  </p>
                 </div>
 
                 {/* Hard Limit Budget */}
                 <div className="space-y-1.5">
                   <div className="flex justify-between">
-                    <label className="text-[#a1a1aa] font-medium">Hard Budget Limit</label>
+                    <label className="text-[#a1a1aa] font-medium">Maximum Authorized Spend</label>
                     <span className="text-indigo-400 font-mono font-bold">{formatINR(policyLimit)}</span>
                   </div>
                   <input
@@ -1031,9 +1232,9 @@ export default function AgentGuardHome() {
                   </div>
                 </div>
 
-                {/* Approved Category Checkboxes */}
+                {/* Categories */}
                 <div className="space-y-1.5">
-                  <label className="text-[#a1a1aa] block font-medium">Whitelisted Categories</label>
+                  <label className="text-[#a1a1aa] block font-medium">Allowed Categories</label>
                   <div className="grid grid-cols-3 gap-2">
                     {["shoes", "clothing", "accessories"].map((cat) => (
                       <label key={cat} className="flex items-center gap-1.5 cursor-pointer text-[#d4d4d8]">
@@ -1049,9 +1250,9 @@ export default function AgentGuardHome() {
                   </div>
                 </div>
 
-                {/* Approved Merchants Checkboxes */}
+                {/* Merchants */}
                 <div className="space-y-1.5">
-                  <label className="text-[#a1a1aa] block font-medium">Whitelisted Merchants</label>
+                  <label className="text-[#a1a1aa] block font-medium">Allowed Merchants</label>
                   <div className="grid grid-cols-1 gap-1.5">
                     {["QuickStep Sports", "UrbanStride", "SportKart"].map((merch) => (
                       <label key={merch} className="flex items-center gap-1.5 cursor-pointer text-[#d4d4d8]">
@@ -1067,7 +1268,7 @@ export default function AgentGuardHome() {
                   </div>
                 </div>
 
-                {/* Approved Payment Methods Checkboxes */}
+                {/* Payment Methods */}
                 <div className="space-y-1.5">
                   <label className="text-[#a1a1aa] block font-medium">Allowed Payment Methods</label>
                   <div className="flex gap-4">
@@ -1084,141 +1285,75 @@ export default function AgentGuardHome() {
                     ))}
                   </div>
                 </div>
-
-                {/* Safety Rules check info */}
-                <div className="bg-[#27272a]/30 border border-[#3f3f46]/30 rounded-xl p-3 space-y-2">
-                  <span className="font-semibold text-white text-[10px] block">Active Verification Policies:</span>
-                  <div className="space-y-1.5 text-[10px] text-[#a1a1aa]">
-                    <div className="flex items-center gap-1.5">
-                      <div className="h-1.5 w-1.5 rounded-full bg-emerald-500"></div>
-                      <span>Max cost validation (Strict cap match)</span>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <div className="h-1.5 w-1.5 rounded-full bg-emerald-500"></div>
-                      <span>Merchant registry signature checks</span>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <div className="h-1.5 w-1.5 rounded-full bg-emerald-500"></div>
-                      <span>No direct payment hooks to LLM</span>
-                    </div>
-                  </div>
-                </div>
               </div>
             </div>
 
-            {/* Active Intent Parser Status Panel */}
+            {/* ACTIVE INTENT TRACKER */}
             <div className="bg-[#18181b]/30 border border-[#27272a] rounded-2xl p-5 space-y-4">
               <div className="flex items-center gap-2 pb-2 border-b border-[#27272a]">
                 <Bot className="h-4.5 w-4.5 text-indigo-400" />
                 <h3 className="text-sm font-semibold text-white">Active Buyer Intent Tracker</h3>
               </div>
               <div className="space-y-2 text-xs">
-                {/* Category */}
                 <div className="flex justify-between items-center bg-[#09090b]/40 p-2.5 rounded-xl border border-[#27272a]/50">
                   <span className="text-[#a1a1aa] font-medium">Category</span>
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-white capitalize">{sessionIntent?.category?.value || "shoes"}</span>
-                    <span className="text-[9px] bg-indigo-500/20 text-indigo-400 px-1.5 py-0.5 rounded font-mono font-medium">
-                      {sessionIntent?.category?.source === "explicit" ? "✓ USER SPECIFIED" : "⚠ DEFAULT ASSUMPTION"}
-                    </span>
-                  </div>
+                  <span className="text-white capitalize">{sessionIntent?.category?.value || "shoes"} ({sessionIntent?.category?.strength || "hard"})</span>
                 </div>
-                {/* Size */}
                 <div className="flex justify-between items-center bg-[#09090b]/40 p-2.5 rounded-xl border border-[#27272a]/50">
                   <span className="text-[#a1a1aa] font-medium">Shoe Size</span>
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-white font-mono">{sessionIntent?.size?.value || "Not specified"}</span>
-                    {sessionIntent?.size?.value ? (
-                      <span className="text-[9px] bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded font-mono font-medium">
-                        ✓ USER SPECIFIED
-                      </span>
-                    ) : (
-                      <span className="text-[9px] bg-rose-500/20 text-rose-400 px-1.5 py-0.5 rounded font-mono font-medium animate-pulse">
-                        ⚠ MISSING / BLOCKED
-                      </span>
-                    )}
-                  </div>
+                  <span className="text-white font-mono">{sessionIntent?.size?.value || "Not specified"} ({sessionIntent?.size?.strength || "hard"})</span>
                 </div>
-                {/* Budget */}
                 <div className="flex justify-between items-center bg-[#09090b]/40 p-2.5 rounded-xl border border-[#27272a]/50">
                   <span className="text-[#a1a1aa] font-medium">Max Budget</span>
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-white font-mono">{sessionIntent?.maxBudget?.value ? `₹${sessionIntent.maxBudget.value}` : "Not specified"}</span>
-                    {sessionIntent?.maxBudget?.value ? (
-                      <span className="text-[9px] bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded font-mono font-medium">
-                        ✓ USER SPECIFIED
-                      </span>
-                    ) : (
-                      <span className="text-[9px] bg-amber-500/20 text-amber-400 px-1.5 py-0.5 rounded font-mono font-medium">
-                        ⚠ ASSUMED (ANY)
-                      </span>
-                    )}
-                  </div>
+                  <span className="text-white font-mono">{sessionIntent?.maxBudget?.value ? `₹${sessionIntent.maxBudget.value}` : "Not specified"} ({sessionIntent?.maxBudget?.strength || "hard"})</span>
                 </div>
-                {/* Color */}
                 <div className="flex justify-between items-center bg-[#09090b]/40 p-2.5 rounded-xl border border-[#27272a]/50">
-                  <span className="text-[#a1a1aa] font-medium">Preferred Color</span>
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-white capitalize">{sessionIntent?.color?.value || "Flexible / Any"}</span>
-                    {sessionIntent?.color?.value ? (
-                      sessionIntent.color.source === "explicit" ? (
-                        <span className="text-[9px] bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded font-mono font-medium">
-                          ✓ USER SPECIFIED
-                        </span>
-                      ) : (
-                        <span className="text-[9px] bg-amber-500/20 text-amber-400 px-1.5 py-0.5 rounded font-mono font-medium">
-                          ⚠ INFERRED
-                        </span>
-                      )
-                    ) : (
-                      <span className="text-[9px] bg-amber-500/20 text-amber-400 px-1.5 py-0.5 rounded font-mono font-medium">
-                        ⚠ FLEXIBLE
-                      </span>
-                    )}
-                  </div>
+                  <span className="text-[#a1a1aa] font-medium">Color Preference</span>
+                  <span className="text-white capitalize">{sessionIntent?.color?.value || "Flexible"} ({sessionIntent?.color?.strength || "soft"})</span>
+                </div>
+                <div className="flex justify-between items-center bg-[#09090b]/40 p-2.5 rounded-xl border border-[#27272a]/50">
+                  <span className="text-[#a1a1aa] font-medium">Merchant Preference</span>
+                  <span className="text-white capitalize">{sessionIntent?.merchantPreference?.value || "Any allowed"}</span>
                 </div>
               </div>
             </div>
 
-            {/* Merchant Catalog Showcase */}
-            <div className="bg-[#18181b]/30 border border-[#27272a] rounded-2xl p-5 space-y-3 flex-1 flex flex-col overflow-hidden">
+            {/* AUDIT ENGINE TIMELINE */}
+            <div className="bg-[#18181b]/30 border border-[#27272a] rounded-2xl p-5 space-y-4 flex-1 overflow-hidden flex flex-col max-h-[350px]">
               <div className="flex items-center gap-2 pb-2 border-b border-[#27272a]">
-                <Database className="h-4.5 w-4.5 text-indigo-400" />
-                <h3 className="text-sm font-semibold text-white">Merchant Stock Catalog</h3>
+                <Sliders className="h-4.5 w-4.5 text-indigo-400" />
+                <h3 className="text-sm font-semibold text-white">Agent Decision Trace</h3>
               </div>
-              <div className="flex-1 overflow-y-auto space-y-2.5 text-xs pr-1">
-                {MOCK_PRODUCTS.map((prod) => (
-                  <div key={prod.id} className="p-3 bg-[#09090b]/50 border border-[#27272a] rounded-xl flex items-center justify-between">
-                    <div>
-                      <p className="font-medium text-white text-xs">{prod.name}</p>
-                      <p className="text-[#a1a1aa] text-[10px] mt-0.5">
-                        Sizes: {prod.sizes.join(", ")} | Color: <span className="capitalize">{prod.color}</span>
-                      </p>
-                      <p className="text-[9px] text-[#71717a] mt-0.5">{prod.merchantName}</p>
+              <div className="flex-1 overflow-y-auto space-y-3 pr-1">
+                {auditLogs.length === 0 ? (
+                  <p className="text-xs text-[#71717a] text-center py-4">No audit steps recorded yet.</p>
+                ) : (
+                  auditLogs.map((log, idx) => (
+                    <div key={idx} className="flex gap-2.5 text-[11px] leading-relaxed">
+                      <div className="mt-1 shrink-0">
+                        {log.status === "success" && <div className="h-2 w-2 rounded-full bg-emerald-500" />}
+                        {log.status === "error" && <div className="h-2 w-2 rounded-full bg-rose-500 animate-pulse" />}
+                        {log.status === "warning" && <div className="h-2 w-2 rounded-full bg-amber-500" />}
+                        {log.status === "info" && <div className="h-2 w-2 rounded-full bg-indigo-500" />}
+                      </div>
+                      <div className="flex-1">
+                        <div className="flex items-center justify-between">
+                          <span className="font-semibold text-zinc-100 uppercase text-[9px] tracking-wider font-mono">{log.step}</span>
+                          <span className="text-[#71717a] text-[9px] font-mono">{log.time}</span>
+                        </div>
+                        <p className="text-[#a1a1aa] mt-0.5">{log.message}</p>
+                      </div>
                     </div>
-                    <div className="text-right shrink-0">
-                      <p className="font-bold text-white text-xs">{formatINR(prod.price)}</p>
-                      {prod.stock > 0 ? (
-                        <span className="text-[10px] text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded mt-1 inline-block">
-                          {prod.stock} In Stock
-                        </span>
-                      ) : (
-                        <span className="text-[10px] text-rose-500 bg-rose-500/10 px-2 py-0.5 rounded mt-1 inline-block">
-                          Out of Stock
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                ))}
+                  ))
+                )}
               </div>
             </div>
-
           </div>
 
-          {/* Column 3: Timeline & Webhook Sandbox (Span 3) */}
-          <div className="lg:col-span-3 flex flex-col gap-6">
+          {/* COLUMN 3: Webhook sandbox, live catalog, order history (col-span-4) */}
+          <div className="lg:col-span-4 flex flex-col gap-6">
             
-            {/* Razorpay Webhook Sandbox */}
+            {/* WEBHOOK SANDBOX */}
             <div className="bg-[#18181b]/30 border border-[#27272a] rounded-2xl p-5 space-y-4">
               <div className="flex items-center justify-between pb-2 border-b border-[#27272a]">
                 <div className="flex items-center gap-2">
@@ -1250,12 +1385,8 @@ export default function AgentGuardHome() {
                       <span className="text-emerald-400 font-bold">{formatINR(activeCheckoutProduct.price)}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-[#a1a1aa]">Internal Order:</span>
-                      <span className="text-white font-mono text-[9px] truncate max-w-[130px]" title={activeOrderId}>{activeOrderId || "creating..."}</span>
-                    </div>
-                    <div className="flex justify-between">
                       <span className="text-[#a1a1aa]">Razorpay ID:</span>
-                      <span className="text-white font-mono text-[9px] truncate max-w-[130px]" title={activeRazorpayOrderId}>{activeRazorpayOrderId || "creating..."}</span>
+                      <span className="text-white font-mono text-[9px] truncate max-w-[130px]">{activeRazorpayOrderId || "creating..."}</span>
                     </div>
                   </div>
 
@@ -1300,77 +1431,147 @@ export default function AgentGuardHome() {
                       setActiveOrderId("");
                       setActiveRazorpayOrderId("");
                     }}
-                    className="text-[10px] text-zinc-400 underline hover:text-white mt-1 block w-full text-center"
+                    className="bg-[#27272a] hover:bg-[#3f3f46] text-white font-semibold py-1.5 px-4 rounded-xl transition-colors text-[10px]"
                   >
-                    Reset Sandbox
+                    Clear Sandbox Panel
                   </button>
                 </div>
               )}
 
-              {paymentStep === "failed" && activeCheckoutProduct && (
-                <div className="bg-rose-500/10 border border-rose-500/20 text-rose-400 p-4 rounded-xl text-center space-y-2">
-                  <AlertTriangle className="h-7 w-7 mx-auto" />
-                  <p className="text-xs font-semibold">Transaction Aborted</p>
-                  <p className="text-[10px] text-[#a1a1aa]">
-                    The transaction was canceled by the customer or checkout signature check failed. Safety policies halted execution.
-                  </p>
+              {paymentStep === "failed" && (
+                <div className="bg-rose-500/10 border border-rose-500/20 text-rose-400 p-4 rounded-xl space-y-3">
+                  <div className="flex items-center gap-2">
+                    <ShieldAlert className="h-5 w-5" />
+                    <p className="text-xs font-semibold">Purchase Gate Blocked</p>
+                  </div>
+                  
+                  <div className="space-y-2 text-[10px] text-[#a1a1aa] leading-relaxed">
+                    <p><span className="text-rose-400 font-semibold">WHAT HAPPENED:</span> The payment transaction was rejected, cancelled, or failed validation limits.</p>
+                    <p><span className="text-rose-400 font-semibold">WHY:</span> Either signature verification signature mismatches occurred, or the client-side cost exceeds maximum limits.</p>
+                    <p><span className="text-rose-400 font-semibold">WHAT YOU CAN DO:</span> Adjust your max spend limit or select another payment option from the policy center.</p>
+                  </div>
+                  
                   <button
                     onClick={() => {
                       setPaymentStep("none");
                       setActiveCheckoutProduct(null);
-                      setActiveOrderId("");
-                      setActiveRazorpayOrderId("");
                     }}
-                    className="text-[10px] text-zinc-400 underline hover:text-white mt-1 block w-full text-center"
+                    className="w-full bg-[#27272a] hover:bg-[#3f3f46] text-white font-semibold py-1.5 rounded-lg transition-colors text-[10px]"
                   >
-                    Reset Sandbox
+                    Try Again
                   </button>
                 </div>
               )}
             </div>
 
-            {/* Audit Log / Timeline */}
-            <div className="bg-[#18181b]/30 border border-[#27272a] rounded-2xl p-5 flex-1 flex flex-col overflow-hidden max-h-[350px]">
+            {/* LIVE DB CATALOG SHOWCASE */}
+            <div className="bg-[#18181b]/30 border border-[#27272a] rounded-2xl p-5 space-y-3 max-h-[300px] overflow-hidden flex flex-col">
               <div className="flex items-center gap-2 pb-2 border-b border-[#27272a]">
-                <BarChart3 className="h-4.5 w-4.5 text-indigo-400" />
-                <h3 className="text-sm font-semibold text-white">Decisions Audit Log</h3>
+                <Database className="h-4.5 w-4.5 text-indigo-400" />
+                <h3 className="text-sm font-semibold text-white">Live DB Catalog Showcase</h3>
               </div>
-
-              <div className="flex-1 overflow-y-auto mt-3 pr-1 space-y-3 font-mono text-[10px]">
-                {auditLogs.map((log, index) => (
-                  <div key={index} className="flex gap-2.5 items-start">
-                    <div className="text-[#71717a] shrink-0 font-light">{log.time}</div>
-                    <div className="space-y-0.5">
-                      <span
-                        className={`font-semibold uppercase text-[8px] px-1 rounded inline-block ${
-                          log.status === "success"
-                            ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
-                            : log.status === "warning"
-                            ? "bg-amber-500/20 text-amber-400 border border-amber-500/30"
-                            : log.status === "error"
-                            ? "bg-rose-500/20 text-rose-400 border border-rose-500/30"
-                            : "bg-indigo-500/20 text-indigo-400 border border-indigo-500/30"
-                        }`}
-                      >
-                        {log.step}
-                      </span>
-                      <p className="text-zinc-300 leading-normal">{log.message}</p>
+              <div className="flex-1 overflow-y-auto space-y-2.5 text-xs pr-1">
+                {liveCatalog.map((prod) => (
+                  <div key={prod.id} className="p-3 bg-[#09090b]/50 border border-[#27272a] rounded-xl flex items-center justify-between">
+                    <div>
+                      <p className="font-medium text-white text-xs">{prod.name}</p>
+                      <p className="text-[#a1a1aa] text-[10px] mt-0.5">
+                        Sizes: {prod.sizes.join(", ")} | Color: <span className="capitalize">{prod.color}</span>
+                      </p>
+                      <p className="text-[9px] text-[#71717a] mt-0.5">{prod.merchantName}</p>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <p className="font-bold text-white text-xs">{formatINR(prod.price)}</p>
+                      {prod.stock > 0 ? (
+                        <span className="text-[10px] text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded mt-1 inline-block">
+                          {prod.stock} In Stock
+                        </span>
+                      ) : (
+                        <span className="text-[10px] text-rose-500 bg-rose-500/10 px-2 py-0.5 rounded mt-1 inline-block">
+                          Out of Stock
+                        </span>
+                      )}
                     </div>
                   </div>
                 ))}
               </div>
             </div>
 
+            {/* REAL ORDER HISTORY */}
+            <div className="bg-[#18181b]/30 border border-[#27272a] rounded-2xl p-5 space-y-3 flex-1 flex flex-col overflow-hidden max-h-[350px]">
+              <div className="flex items-center justify-between pb-2 border-b border-[#27272a]">
+                <div className="flex items-center gap-2">
+                  <ShoppingCart className="h-4.5 w-4.5 text-indigo-400" />
+                  <h3 className="text-sm font-semibold text-white">Order History</h3>
+                </div>
+                
+                <div className="flex items-center gap-1 bg-[#09090b] p-0.5 rounded-lg border border-[#27272a]">
+                  {["ALL", "SUCCESSFUL", "FAILED"].map((filt) => (
+                    <button
+                      key={filt}
+                      onClick={() => setOrdersFilter(filt as any)}
+                      className={`px-2 py-0.5 rounded text-[8px] font-bold tracking-wider uppercase transition-all ${
+                        ordersFilter === filt
+                          ? "bg-indigo-600 text-white"
+                          : "text-[#71717a] hover:text-white"
+                      }`}
+                    >
+                      {filt === "SUCCESSFUL" ? "Paid" : filt === "FAILED" ? "Failed" : "All"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex-1 overflow-y-auto space-y-2 pr-1 text-xs">
+                {filteredOrders.length === 0 ? (
+                  <p className="text-[10px] text-[#71717a] text-center py-4">No matching orders found.</p>
+                ) : (
+                  filteredOrders.map((ord) => (
+                    <div key={ord.id} className="p-2.5 bg-[#09090b]/40 border border-[#27272a] rounded-xl flex items-center justify-between text-[11px]">
+                      <div>
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-semibold text-white font-mono">{ord.id.substring(0, 8)}...</span>
+                          <span className="text-[#71717a] text-[9px] font-mono">
+                            {new Date(ord.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                        </div>
+                        <p className="text-[#a1a1aa] text-[9px] mt-0.5 truncate max-w-[130px]" title={ord.items?.[0]?.product?.name || "Order Product"}>
+                          {ord.items?.[0]?.product?.name || "Product"} (Qty: {ord.items?.[0]?.quantity || 1})
+                        </p>
+                      </div>
+                      
+                      <div className="text-right shrink-0">
+                        <p className="font-bold text-white">{formatINR(ord.totalAmount)}</p>
+                        <span className={`text-[8px] font-bold uppercase px-1.5 py-0.5 rounded mt-1 inline-block ${
+                          ord.status === "PAYMENT_CAPTURED" || ord.status === "PAID"
+                            ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
+                            : ord.status === "PAYMENT_FAILED" || ord.status === "FAILED"
+                            ? "bg-rose-500/20 text-rose-400 border border-rose-500/30"
+                            : "bg-amber-500/20 text-amber-400 border border-amber-500/30"
+                        }`}>
+                          {ord.status}
+                        </span>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
           </div>
 
         </div>
-      </main>
 
-      {/* Footer details */}
-      <footer className="border-t border-[#27272a] bg-[#09090b] text-[#71717a] py-6 text-center text-xs mt-12 space-y-1">
-        <p>© 2026 AgentGuard - Built for Razorpay AI Buildathon Hackathon.</p>
-        <p className="text-[10px]">All payment executions in Sandbox Test Mode. Bounded Autonomy Engine V1.0.</p>
+      </section>
+      
+      {/* FOOTER METRICS */}
+      <footer className="border-t border-[#1f1f2e] bg-[#020205] py-8 text-center text-xs text-[#71717a]">
+        <div className="max-w-[1200px] mx-auto space-y-2 px-6">
+          <p>AgentGuard Secure Commerce Hub — Phase 7 Competition Release v0.6.5</p>
+          <p>Enforced using deterministic policy verifiers and atomic cryptographic signature assertions.</p>
+        </div>
       </footer>
+
     </div>
   );
 }

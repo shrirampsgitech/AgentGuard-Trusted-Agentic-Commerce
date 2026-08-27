@@ -79,6 +79,16 @@ export class ConstraintEngine {
       // 4. Return window factor (more days is better)
       score += p.returnDays * 0.5;
 
+      // 5. Soft color preference penalty (if specified color doesn't match)
+      if (intent.color.value !== null && p.color.toLowerCase() !== intent.color.value.toLowerCase()) {
+        score -= 200;
+      }
+
+      // 6. Soft brand/merchant preference penalty (if specified brand doesn't match)
+      if (intent.brand.value !== null && p.merchantName.toLowerCase() !== intent.brand.value.toLowerCase()) {
+        score -= 150;
+      }
+
       return { product: p, score };
     });
 

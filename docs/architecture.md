@@ -141,3 +141,28 @@ To prevent double inventory deductions or state race conditions from concurrent 
    ```
 2. **Atomic Rollback:** If `updated.count === 0`, indicating a concurrent thread has already captured the payment, it throws an `ALREADY_PROCESSED` error to immediately abort the transaction.
 3. **Exactly-Once Decrement:** Product stock levels are decremented *only* inside the transaction when the status update succeeds, preventing double-deductions.
+
+---
+
+## 7. Session State Tracking & Autonomy Synchronizing
+
+To handle complex multi-turn conversations and secure hand-offs (recommendation vs checkout authorization), AgentGuard implements persistent session tracking via the `SessionState` service:
+
+1. **Schema Structure:** The `SessionState` DB record holds:
+   - `id`: Unique session identifier matching client tracking.
+   - `buyerIntent`: Serialized state of the extracted customer intent (budget, preferences, size constraints).
+   - `selectedProductId`: ID of the product currently staged in the cart.
+   - `relaxationDecisions`: Record of constraints explicitly relaxed by the customer (e.g. `["color", "budget"]`).
+   - `authorizationState`: Current gating status (`NONE`, `APPROVED_FOR_CHECKOUT`, `POLICY_AUTHORIZED`).
+2. **Offline Fallback Store:** When the PostgreSQL connection is lost or unavailable, `SessionStateService` seamlessly falls back to a thread-safe, in-memory Cache Store to prevent session loss.
+3. **Webhook Sync State:** When a payment fails (indicated by `payment.failed` webhook), the database order transitions to `PAYMENT_FAILED` and the matching session state's `authorizationState` resets to `NONE` to prevent checkout deadlocks.
+
+---
+
+## 8. Prestige UI Portal Redesign
+
+The shopper portal acts as a transparent, high-visibility dashboard for the trust architecture during live demos:
+
+1. **Visual Decision Trace:** Queries the audit trail database in real-time, rendering step-by-step audit blocks directly on the screen (e.g. checking budget, checking category limits, verifying merchant eligibility).
+2. **Failure Recovery UX Cards:** On constraint violations or policy blocks, renders recovery panels explaining *why* it was blocked (e.g. price exceeded budget cap) and providing direct alternative choices or negotiation click controls.
+3. **Autonomy Gating Slider:** An interactive slider that directly binds to the backend's active policy autonomy level (Recommend, Prepare, Autonomous), allowing real-time switching of the agent's checkout capabilities.

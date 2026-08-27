@@ -4,6 +4,8 @@ import { MerchantService } from "../../../services/merchantService";
 import { PolicyEngine, OrderContext, UserPolicyData } from "../../../services/policyEngine";
 import { PaymentService } from "../../../services/paymentService";
 import { AuditService } from "../../../services/auditService";
+import { SessionStateService } from "../../../services/sessionStateService";
+
 
 export const dynamic = "force-dynamic";
 
@@ -158,6 +160,19 @@ export async function POST(request: NextRequest) {
       "razorpay_order_created",
       `Razorpay Order ${rzpOrder.id} created successfully for amount ₹${totalAmount}`
     );
+
+    // Sync session state with checkout approval
+    const storedSession = await SessionStateService.getSession(activeSessionId);
+    if (storedSession && storedSession.buyerIntent) {
+      storedSession.buyerIntent.authorizationStatus.value = "APPROVED_FOR_CHECKOUT";
+      await SessionStateService.saveSession(
+        activeSessionId,
+        storedSession.buyerIntent,
+        productId,
+        storedSession.relaxationDecisions,
+        "APPROVED_FOR_CHECKOUT"
+      );
+    }
 
     return NextResponse.json({
       orderId: internalOrder.id,

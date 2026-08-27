@@ -105,3 +105,14 @@ model AuditLog {
   message   String
   details   Json?    // Stores detailed metadata/JSON payloads of the step
 }
+
+model SessionState {
+  id                  String   @id
+  buyerIntent         Json?    // Serialized BuyerIntent object
+  selectedProductId   String?  // References currently selected product
+  relaxationDecisions String[] // e.g. ["budget", "size"]
+  authorizationState  String   @default("NONE")
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+}
+

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "../../../../lib/prisma";
 import { PaymentService } from "../../../../services/paymentService";
 import { AuditService } from "../../../../services/auditService";
+import { SessionStateService } from "../../../../services/sessionStateService";
 
 export const dynamic = "force-dynamic";
 
@@ -38,7 +39,7 @@ export async function POST(request: NextRequest) {
     );
 
     if (!isValid) {
-      await AuditService.logStep(activeSessionId, "payment_signature_invalid", `Signature check failed for order ${orderId}`);
+      await AuditService.logStep(activeSessionId, "payment_failed", `Signature check failed for order ${orderId}`);
       await prisma.order.update({
         where: { id: orderId },
         data: {
@@ -48,6 +49,20 @@ export async function POST(request: NextRequest) {
         },
       });
       await AuditService.logStep(activeSessionId, "payment_failed", `Order ${orderId} marked as PAYMENT_FAILED`);
+
+      // Sync session state to failure
+      const storedSession = await SessionStateService.getSession(activeSessionId);
+      if (storedSession && storedSession.buyerIntent) {
+        storedSession.buyerIntent.authorizationStatus.value = "NONE";
+        await SessionStateService.saveSession(
+          activeSessionId,
+          storedSession.buyerIntent,
+          storedSession.selectedProductId,
+          storedSession.relaxationDecisions,
+          "NONE"
+        );
+      }
+
       return NextResponse.json({ error: "Invalid payment signature." }, { status: 400 });
     }
 
@@ -89,6 +104,19 @@ export async function POST(request: NextRequest) {
       await AuditService.logStep(activeSessionId, "payment_captured", `Order ${orderId} successfully captured`);
       await AuditService.logStep(activeSessionId, "inventory_updated", `Deducted stock for items in order ${orderId}`);
       await AuditService.logStep(activeSessionId, "order_confirmed", `Transaction complete. Order ${orderId} confirmed.`);
+
+      // Sync session state to POLICY_AUTHORIZED
+      const storedSession = await SessionStateService.getSession(activeSessionId);
+      if (storedSession && storedSession.buyerIntent) {
+        storedSession.buyerIntent.authorizationStatus.value = "POLICY_AUTHORIZED";
+        await SessionStateService.saveSession(
+          activeSessionId,
+          storedSession.buyerIntent,
+          storedSession.selectedProductId,
+          storedSession.relaxationDecisions,
+          "POLICY_AUTHORIZED"
+        );
+      }
 
       return NextResponse.json({ success: true, message: "Payment verified successfully." });
     } catch (txError: any) {

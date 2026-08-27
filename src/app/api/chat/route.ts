@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { BuyerAgentService } from "../../../services/buyerAgent";
+import { SessionStateService } from "../../../services/sessionStateService";
 import { prisma } from "../../../lib/prisma";
 
 export const dynamic = "force-dynamic";
@@ -20,7 +21,6 @@ export async function POST(request: NextRequest) {
         where: { id: "default-policy" },
       });
       if (policy) {
-        // If DB has explicit configs, we can use them
         policyAutonomy = policy.autonomyLevel;
         policyLimit = policy.maxBudget;
       }
@@ -28,15 +28,28 @@ export async function POST(request: NextRequest) {
       // Safe fallback if database connection is offline
     }
 
+    // Load persistent session state if it exists
+    const storedSession = await SessionStateService.getSession(activeSessionId);
+    const previousIntent = storedSession?.buyerIntent || sessionIntent;
+
     const agentResult = await BuyerAgentService.processMessage(
       message,
       activeSessionId,
-      sessionIntent,
+      previousIntent,
       policyAutonomy,
       policyLimit
     );
 
-    // Retrieve full audit timeline from database
+    // Persist updated intent & selected product back to database
+    await SessionStateService.saveSession(
+      activeSessionId,
+      agentResult.intent,
+      agentResult.selectedProduct ? agentResult.selectedProduct.id : null,
+      storedSession?.relaxationDecisions || [],
+      agentResult.intent.authorizationStatus.value
+    );
+
+    // Retrieve full audit timeline
     const { AuditService } = require("../../../services/auditService");
     const logs = await AuditService.getLogs(activeSessionId);
 

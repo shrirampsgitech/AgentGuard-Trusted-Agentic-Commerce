@@ -52,6 +52,8 @@ The agent is empowered to reason, negotiate, and prepare checkouts autonomously,
 - **Price-Change Protection:** Tracks initial selection prices and locks checkout against mid-session price increases.
 - **Stale Data Safeguards:** Re-verifies inventory levels and pricing from live database records. If connection is lost or unavailable, checkout is immediately blocked.
 - **Purchase Safety Check UI:** Renders a visual pass/fail checklist on the Shopper Portal showing individual policy item validations.
+- **Prestige UI Portal Redesign:** Modern dark-gradient design with trust matrices, safety grids, and interactive autonomy controls.
+- **Demo Scenario Preparer API:** Configures base catalogs and policy limits to instantly demonstrate success, compromise negotiation, and safety block scenarios.
 - **Razorpay Sandbox Integration:** Secure Test Mode checkout with server-side signature validations and raw webhook signature verification.
 - **Immutable Transaction Auditing:** Logs detailed validation checkpoints (e.g., `policy_check_started`, `budget_check`, `price_verification`, `policy_allowed`).
 
@@ -76,12 +78,13 @@ The agent is empowered to reason, negotiate, and prepare checkouts autonomously,
 - **Phase 4 — Trust, Authorization & Policy Enforcement** ✓
 - **Phase 5 — Razorpay Payment Integration** ✓
 - **Phase 6 — Agentic Commerce Intelligence & Competition Polish** ✓
+- **Phase 7 — Real-World Agentic Commerce & Competition Demo** ✓
 
 ---
 
 ## 4. Testing
 
-AgentGuard contains a robust Vitest test suite with **80 passing unit and integration tests** checking catalog properties, constraint scoring, parser history, safety gates, signature validation, duplicate webhooks, and concurrency safety:
+AgentGuard contains a robust Vitest test suite with **106 passing unit and integration tests** checking catalog properties, constraint scoring, parser history, safety gates, signature validation, duplicate webhooks, concurrency safety, webhook failures, and sandbox scenarios:
 
 To execute tests:
 ```bash
@@ -95,7 +98,8 @@ npm run test
   ✓ src/__tests__/policy.test.ts (16 tests)
   ✓ src/__tests__/checkout.test.ts (23 tests)
   ✓ src/__tests__/intelligence.test.ts (20 tests)
+  ✓ src/__tests__/phase7.test.ts (26 tests)
 
- Test Files  5 passed (5)
-      Tests  80 passed (80)
+ Test Files  6 passed (6)
+      Tests  106 passed (106)
 ```
