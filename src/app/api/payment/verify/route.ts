@@ -88,16 +88,16 @@ export async function POST(request: NextRequest) {
           throw new Error("ALREADY_PROCESSED");
         }
 
-        // Successfully updated status. Now deduct stock.
+        // Successfully updated status. Now deduct stock atomically.
         for (const item of order.items) {
-          const product = await tx.product.findUnique({ where: { id: item.productId } });
-          if (product) {
-            const newStock = Math.max(0, product.stock - item.quantity);
-            await tx.product.update({
-              where: { id: item.productId },
-              data: { stock: newStock },
-            });
-          }
+          await tx.product.update({
+            where: { id: item.productId },
+            data: {
+              stock: {
+                decrement: item.quantity,
+              },
+            },
+          });
         }
       });
 
