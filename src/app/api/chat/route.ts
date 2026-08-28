@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { BuyerAgentService } from "../../../services/buyerAgent";
 import { SessionStateService } from "../../../services/sessionStateService";
 import { prisma } from "../../../lib/prisma";
+import { AuditService } from "../../../services/auditService";
 
 export const dynamic = "force-dynamic";
 
@@ -50,7 +51,6 @@ export async function POST(request: NextRequest) {
     );
 
     // Retrieve full audit timeline
-    const { AuditService } = require("../../../services/auditService");
     const logs = await AuditService.getLogs(activeSessionId);
 
     return NextResponse.json(

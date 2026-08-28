@@ -526,4 +526,26 @@ describe("Agentic Commerce Intelligence & Competition Polish - Phase 6 Tests", (
     const ranked = ConstraintEngine.rankProducts(products, intent);
     expect(ranked[0].id).toBe("fast"); // fast shoe ranked higher!
   });
+
+  // 17. Natural language shopping queries parsing checks
+  it("should correctly parse budget 3k, size 9, and category shoes/blue color from natural language", async () => {
+    const agent = BuyerAgentService as any;
+    const intent = await agent.extractIntent("buy blue trainers size 9 budget 3k");
+    
+    expect(intent.category.value).toBe("shoes");
+    expect(intent.size.value).toBe(9);
+    expect(intent.maxBudget.value).toBe(3000);
+    expect(intent.color.value).toBe("blue");
+  });
+
+  it("should correctly parse budget 2k, size 9, and category shoes/blue color from detailed request", async () => {
+    const agent = BuyerAgentService as any;
+    const intent = await agent.extractIntent("buy me SwiftRun Blue Trainer size 9 budget 2k");
+    
+    expect(intent.category.value).toBe("shoes");
+    expect(intent.size.value).toBe(9);
+    expect(intent.maxBudget.value).toBe(2000);
+    expect(intent.color.value).toBe("blue");
+  });
 });
+

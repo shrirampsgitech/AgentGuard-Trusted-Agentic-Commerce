@@ -708,9 +708,14 @@ export class BuyerAgentService {
     }
 
     // Budget check
-    const budgetMatch = normalized.match(/(?:under|below|max|₹|rs\.?\s*)(\d+[\d,]*)/i);
+    const budgetMatch = normalized.match(/(?:under|below|max|budget|price|₹|rs\.?)\s*(\d+[\d,]*(\.\d+)?)\s*([kK]?)/i);
     if (budgetMatch) {
-      intent.maxBudget.value = parseFloat(budgetMatch[1].replace(/,/g, ""));
+      const rawVal = budgetMatch[1].replace(/,/g, "");
+      let parsedVal = parseFloat(rawVal);
+      if (budgetMatch[3] && budgetMatch[3].toLowerCase() === "k") {
+        parsedVal *= 1000;
+      }
+      intent.maxBudget.value = parsedVal;
       intent.maxBudget.source = "explicit";
       intent.maxBudget.confidence = 1.0;
 
@@ -719,17 +724,24 @@ export class BuyerAgentService {
       } else {
         intent.maxBudget.strength = "hard";
       }
-    } else if (normalized.includes("2000") || normalized.includes("2k")) {
-      intent.maxBudget.value = 2000;
-      intent.maxBudget.source = "explicit";
-      intent.maxBudget.confidence = 1.0;
-      intent.maxBudget.strength = "hard";
-    } else if (normalized.includes("3000") || normalized.includes("3k")) {
-      intent.maxBudget.value = 3000;
-      intent.maxBudget.source = "explicit";
-      intent.maxBudget.confidence = 1.0;
-      intent.maxBudget.strength = "hard";
+    } else {
+      const kMatch = normalized.match(/\b(\d+(?:\.\d+)?)\s*[kK]\b/);
+      if (kMatch) {
+        intent.maxBudget.value = parseFloat(kMatch[1]) * 1000;
+        intent.maxBudget.source = "explicit";
+        intent.maxBudget.confidence = 1.0;
+        intent.maxBudget.strength = "hard";
+      } else {
+        const numMatch = normalized.match(/\b(1\d{3}|2\d{3}|3\d{3}|4\d{3}|5\d{3})\b/);
+        if (numMatch) {
+          intent.maxBudget.value = parseFloat(numMatch[1]);
+          intent.maxBudget.source = "explicit";
+          intent.maxBudget.confidence = 1.0;
+          intent.maxBudget.strength = "hard";
+        }
+      }
     }
+
 
     // Brand check
     const brands = ["nike", "adidas", "puma", "quickstep", "urbanstride", "sportkart"];
