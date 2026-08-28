@@ -223,6 +223,4 @@ async function main() {
   }
 }
 
-if (require.main === module || !module.parent) {
-  main();
-}
+main();

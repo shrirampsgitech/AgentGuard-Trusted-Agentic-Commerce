@@ -26,6 +26,15 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
+    // 1.5. Session state product ID consistency check
+    const storedSession = await SessionStateService.getSession(activeSessionId);
+    if (!storedSession || !storedSession.selectedProductId || storedSession.selectedProductId !== productId) {
+      await AuditService.logStep(activeSessionId, "checkout_blocked", `Checkout failed: Product ID mismatch or stale staged product state. Requested: ${productId}, Staged: ${storedSession?.selectedProductId}`);
+      return NextResponse.json(
+        { error: "Stale staged-product state or mismatched product ID. Checkout blocked." },
+        { status: 400 }
+      );
+    }
 
     // 2. Fresh Product Lookup
     const product = await prisma.product.findUnique({
@@ -162,7 +171,6 @@ export async function POST(request: NextRequest) {
     );
 
     // Sync session state with checkout approval
-    const storedSession = await SessionStateService.getSession(activeSessionId);
     if (storedSession && storedSession.buyerIntent) {
       storedSession.buyerIntent.authorizationStatus.value = "APPROVED_FOR_CHECKOUT";
       await SessionStateService.saveSession(

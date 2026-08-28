@@ -46,3 +46,11 @@ next-env.d.ts
 .claude/
 .cursor/
 .devin/
+node_modules/
+dist/
+
+# PGLite database
+prisma/db/
+
+# Scratch/Probe scripts
+src/test-db-connection.ts
