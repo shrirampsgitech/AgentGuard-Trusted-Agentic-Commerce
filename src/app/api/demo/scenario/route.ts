@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "../../../../lib/prisma";
 import { SessionStateService } from "../../../../services/sessionStateService";
 import { AuditService } from "../../../../services/auditService";
+import { PolicyEngine } from "../../../../services/policyEngine";
+import { MerchantService } from "../../../../services/merchantService";
 
 export const dynamic = "force-dynamic";
 
@@ -174,10 +176,32 @@ const SEED_PRODUCTS = [
 export async function POST(request: NextRequest) {
   try {
     const { scenarioId } = await request.json();
-    console.log(`[Demo Scenario] Configuring database state for Scenario ${scenarioId}...`);
+    console.log(`[Demo Scenario] Configuring state for Scenario ${scenarioId}...`);
 
+    // 1. Always reset in-memory caches
+    AuditService.clearMemoryLogs();
+    await SessionStateService.clearAllSessions();
+    MerchantService.resetMockProducts();
+
+    // Define scenario policy data
+    let policyData = {
+      maxBudget: 2000.0,
+      allowedCategories: ["shoes", "clothing"],
+      allowedMerchants: ["QuickStep Sports", "UrbanStride", "SportKart"],
+      allowedPaymentMethods: ["UPI"],
+      autonomyLevel: 3,
+    };
+
+    if (scenarioId === 2) {
+      policyData.autonomyLevel = 2;
+      MerchantService.setMockStock("prod-exact-match", 0);
+    }
+
+    // Always set in-memory policy cache
+    PolicyEngine.setPolicyMemory(policyData);
+
+    // 2. Try PostgreSQL updates (if online)
     try {
-      // 1. Reset database to baseline
       await prisma.cartItem.deleteMany({});
       await prisma.cart.deleteMany({});
       await prisma.orderItem.deleteMany({});
@@ -185,8 +209,6 @@ export async function POST(request: NextRequest) {
       await prisma.product.deleteMany({});
       await prisma.merchant.deleteMany({});
       await prisma.auditLog.deleteMany({});
-      await SessionStateService.clearAllSessions();
-      AuditService.clearMemoryLogs();
 
       // Seed Merchants
       for (const m of SEED_MERCHANTS) {
@@ -195,87 +217,28 @@ export async function POST(request: NextRequest) {
 
       // Seed Products
       for (const p of SEED_PRODUCTS) {
-        await prisma.product.create({ data: p });
+        // If Scenario 2, set SwiftRun stock to 0
+        const stock = (scenarioId === 2 && p.id === "prod-exact-match") ? 0 : p.stock;
+        await prisma.product.create({ data: { ...p, stock } });
       }
 
-      // 2. Apply scenario configurations
-      if (scenarioId === 1) {
-        // Scenario 1: Perfect Match
-        // Set policy autonomy to 3 (Autonomous) & budget to 2000
-        await prisma.userPolicy.upsert({
-          where: { id: "default-policy" },
-          update: {
-            maxBudget: 2000.0,
-            allowedCategories: ["shoes", "clothing"],
-            allowedMerchants: ["QuickStep Sports", "UrbanStride", "SportKart"],
-            allowedPaymentMethods: ["UPI"],
-            autonomyLevel: 3,
-          },
-          create: {
-            id: "default-policy",
-            maxBudget: 2000.0,
-            allowedCategories: ["shoes", "clothing"],
-            allowedMerchants: ["QuickStep Sports", "UrbanStride", "SportKart"],
-            allowedPaymentMethods: ["UPI"],
-            autonomyLevel: 3,
-          },
-        });
-      } else if (scenarioId === 2) {
-        // Scenario 2: Negotiation
-        // Mark prod-exact-match as out-of-stock (stock = 0)
-        await prisma.product.update({
-          where: { id: "prod-exact-match" },
-          data: { stock: 0 }
-        });
+      await prisma.userPolicy.upsert({
+        where: { id: "default-policy" },
+        update: policyData,
+        create: {
+          id: "default-policy",
+          ...policyData,
+        },
+      });
 
-        // Set policy autonomy to 2 (Prepare)
-        await prisma.userPolicy.upsert({
-          where: { id: "default-policy" },
-          update: {
-            maxBudget: 2000.0,
-            allowedCategories: ["shoes", "clothing"],
-            allowedMerchants: ["QuickStep Sports", "UrbanStride", "SportKart"],
-            allowedPaymentMethods: ["UPI"],
-            autonomyLevel: 2,
-          },
-          create: {
-            id: "default-policy",
-            maxBudget: 2000.0,
-            allowedCategories: ["shoes", "clothing"],
-            allowedMerchants: ["QuickStep Sports", "UrbanStride", "SportKart"],
-            allowedPaymentMethods: ["UPI"],
-            autonomyLevel: 2,
-          },
-        });
-      } else if (scenarioId === 3) {
-        // Scenario 3: Safety Block
-        // Set policy budget to 2000, and ensure prod-budget-conflict is in stock
-        await prisma.userPolicy.upsert({
-          where: { id: "default-policy" },
-          update: {
-            maxBudget: 2000.0,
-            allowedCategories: ["shoes", "clothing"],
-            allowedMerchants: ["QuickStep Sports", "UrbanStride", "SportKart"],
-            allowedPaymentMethods: ["UPI"],
-            autonomyLevel: 3,
-          },
-          create: {
-            id: "default-policy",
-            maxBudget: 2000.0,
-            allowedCategories: ["shoes", "clothing"],
-            allowedMerchants: ["QuickStep Sports", "UrbanStride", "SportKart"],
-            allowedPaymentMethods: ["UPI"],
-            autonomyLevel: 3,
-          },
-        });
-      }
-    } catch (dbError) {
-      console.warn("[Demo Scenario] DB offline. Fallback configuration applied.", dbError);
+      console.log(`[Demo Scenario] PostgreSQL initialized successfully for Scenario ${scenarioId}.`);
+    } catch (dbError: any) {
+      console.warn("[Demo Scenario] DB connection offline. Restoring mock in-memory states instead.", dbError.message);
     }
 
     return NextResponse.json({ success: true, message: `Scenario ${scenarioId} configured.` });
   } catch (error) {
-    console.error("[Demo Scenario] Failed to prepare scenario database:", error);
+    console.error("[Demo Scenario] Failed to prepare scenario:", error);
     return NextResponse.json({ error: "Failed to set up scenario" }, { status: 500 });
   }
 }

@@ -5,6 +5,7 @@ import { PolicyEngine, OrderContext, UserPolicyData } from "../../../services/po
 import { PaymentService } from "../../../services/paymentService";
 import { AuditService } from "../../../services/auditService";
 import { SessionStateService } from "../../../services/sessionStateService";
+import { InMemoryOrderStore } from "../../../services/inMemoryOrderStore";
 
 
 export const dynamic = "force-dynamic";
@@ -19,14 +20,16 @@ export async function POST(request: NextRequest) {
 
     // 1. Fresh Database Availability Check
     const isDbOnline = await MerchantService.isDatabaseAvailable();
-    if (!isDbOnline) {
+    if (!isDbOnline && process.env.FORCE_DB_AVAILABLE === "false") {
       await AuditService.logStep(activeSessionId, "checkout_blocked", "Database offline during checkout. Blocking order creation.");
       return NextResponse.json(
         { error: "Unable to verify the current product state. Purchase blocked for safety." },
         { status: 400 }
       );
     }
+
     // 1.5. Session state product ID consistency check
+    // SessionStateService always falls back to in-memory, so this works regardless of DB state.
     const storedSession = await SessionStateService.getSession(activeSessionId);
     if (!storedSession || !storedSession.selectedProductId || storedSession.selectedProductId !== productId) {
       await AuditService.logStep(activeSessionId, "checkout_blocked", `Checkout failed: Product ID mismatch or stale staged product state. Requested: ${productId}, Staged: ${storedSession?.selectedProductId}`);
@@ -36,11 +39,37 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 2. Fresh Product Lookup
-    const product = await prisma.product.findUnique({
-      where: { id: productId },
-      include: { merchant: true },
-    });
+    // 2. Product Lookup — DB preferred, in-memory static catalog as fallback.
+    let product: {
+      id: string; name: string; category: string; color: string;
+      sizes: number[]; price: number; stock: number; active: boolean;
+      merchantId: string;
+      merchant: { name: string };
+    } | null = null;
+
+    if (isDbOnline) {
+      product = await prisma.product.findUnique({
+        where: { id: productId },
+        include: { merchant: true },
+      });
+    } else {
+      // DB offline: use static mock catalog as read-only source of truth.
+      const mockProd = MerchantService.getMockProductById(productId);
+      if (mockProd) {
+        product = {
+          id: mockProd.id,
+          name: mockProd.name,
+          category: mockProd.category,
+          color: mockProd.color,
+          sizes: mockProd.sizes,
+          price: mockProd.price,
+          stock: mockProd.stock,
+          active: mockProd.active,
+          merchantId: mockProd.merchantId,
+          merchant: { name: mockProd.merchantName },
+        };
+      }
+    }
 
     if (!product) {
       await AuditService.logStep(activeSessionId, "checkout_blocked", `Checkout failed: Product ${productId} not found.`);
@@ -66,31 +95,26 @@ export async function POST(request: NextRequest) {
     }
 
     // 6. Load User Policy (Category, Merchant, Payment, Autonomy, Budget Rules)
-    let policy: UserPolicyData = {
-      id: "default-policy",
-      maxBudget: 2000,
-      allowedCategories: ["shoes", "clothing"],
-      allowedMerchants: ["QuickStep Sports", "UrbanStride"],
-      allowedPaymentMethods: ["UPI"],
-      autonomyLevel: 2,
-    };
+    let policy: UserPolicyData = PolicyEngine.getPolicyMemory();
 
-    try {
-      const dbPolicy = await prisma.userPolicy.findUnique({
-        where: { id: "default-policy" },
-      });
-      if (dbPolicy) {
-        policy = {
-          id: dbPolicy.id,
-          maxBudget: dbPolicy.maxBudget,
-          allowedCategories: dbPolicy.allowedCategories,
-          allowedMerchants: dbPolicy.allowedMerchants,
-          allowedPaymentMethods: dbPolicy.allowedPaymentMethods,
-          autonomyLevel: dbPolicy.autonomyLevel,
-        };
+    if (isDbOnline) {
+      try {
+        const dbPolicy = await prisma.userPolicy.findUnique({
+          where: { id: "default-policy" },
+        });
+        if (dbPolicy) {
+          policy = {
+            id: dbPolicy.id,
+            maxBudget: dbPolicy.maxBudget,
+            allowedCategories: dbPolicy.allowedCategories,
+            allowedMerchants: dbPolicy.allowedMerchants,
+            allowedPaymentMethods: dbPolicy.allowedPaymentMethods,
+            autonomyLevel: dbPolicy.autonomyLevel,
+          };
+        }
+      } catch {
+        // Fallback defaults already set above
       }
-    } catch {
-      // Fallback defaults
     }
 
     // 7. Price Tampering Check (authoritative price comes from product database, compared with originalPrice)
@@ -113,7 +137,7 @@ export async function POST(request: NextRequest) {
       authorizationStatus: authorizationStatus || "NONE",
     };
 
-    // 8. Run PolicyEngine Validation Check Again
+    // 8. Run PolicyEngine Validation Check Again (ALWAYS — security gate independent of DB)
     await AuditService.logStep(activeSessionId, "checkout_policy_validation", "Running final safety policy checks");
     const policyResult = PolicyEngine.validate(orderContext, policy);
 
@@ -127,42 +151,65 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: policyResult.reason, decision: "ASK_USER" }, { status: 400 });
     }
 
-    // 9. Create internal Order record in state 'CREATED'
+    // 9. Create internal Order record — DB preferred, in-memory fallback when offline.
     const totalAmount = contextPrice * quantity;
-    const internalOrder = await prisma.order.create({
-      data: {
-        status: "CREATED",
-        totalAmount,
-        currency: "INR",
-        buyerName: "Shopper",
-        shippingAddress: "Sandbox Test Address",
-        items: {
-          create: {
-            productId: product.id,
-            quantity,
-            size,
-            color: product.color,
-            price: contextPrice,
+    let orderId: string;
+
+    if (isDbOnline) {
+      const internalOrder = await prisma.order.create({
+        data: {
+          status: "CREATED",
+          totalAmount,
+          currency: "INR",
+          buyerName: "Shopper",
+          shippingAddress: "Sandbox Test Address",
+          items: {
+            create: {
+              productId: product.id,
+              quantity,
+              size,
+              color: product.color,
+              price: contextPrice,
+            },
           },
         },
-      },
-    });
+      });
+      orderId = internalOrder.id;
+    } else {
+      // DB offline: create order in in-memory store.
+      const memOrder = InMemoryOrderStore.create({
+        productId: product.id,
+        quantity,
+        size,
+        color: product.color,
+        price: contextPrice,
+        totalAmount,
+      });
+      orderId = memOrder.id;
+    }
 
     // 10. Call PaymentService to create Razorpay Order (converting rupees to paise)
     const rzpOrder = await PaymentService.createRazorpayOrder({
       amount: totalAmount,
       currency: "INR",
-      receipt: `receipt_${internalOrder.id.substring(0, 10)}`,
+      receipt: `receipt_${orderId.substring(0, 10)}`,
     });
 
     // 11. Transition status to 'PENDING_PAYMENT' and store Razorpay Order ID
-    await prisma.order.update({
-      where: { id: internalOrder.id },
-      data: {
+    if (isDbOnline) {
+      await prisma.order.update({
+        where: { id: orderId },
+        data: {
+          razorpayOrderId: rzpOrder.id,
+          status: "PENDING_PAYMENT",
+        },
+      });
+    } else {
+      InMemoryOrderStore.update(orderId, {
         razorpayOrderId: rzpOrder.id,
         status: "PENDING_PAYMENT",
-      },
-    });
+      });
+    }
 
     await AuditService.logStep(
       activeSessionId,
@@ -183,7 +230,7 @@ export async function POST(request: NextRequest) {
     }
 
     return NextResponse.json({
-      orderId: internalOrder.id,
+      orderId,
       razorpayOrderId: rzpOrder.id,
       amount: rzpOrder.amount, // in paise
       currency: "INR",

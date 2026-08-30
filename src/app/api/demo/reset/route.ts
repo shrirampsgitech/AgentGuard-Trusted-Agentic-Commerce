@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "../../../../lib/prisma";
 import { SessionStateService } from "../../../../services/sessionStateService";
 import { AuditService } from "../../../../services/auditService";
+import { PolicyEngine } from "../../../../services/policyEngine";
+import { MerchantService } from "../../../../services/merchantService";
+import { InMemoryOrderStore } from "../../../../services/inMemoryOrderStore";
 
 export const dynamic = "force-dynamic";
 
@@ -175,7 +178,13 @@ export async function POST() {
   try {
     console.log("[Demo Reset] Initializing catalog and policy reset...");
 
-    // 1. Clean existing records (Safely wrapped in try-catch to avoid crashing if DB offline)
+    // 1. Always reset in-memory catalog, order store, and caches
+    AuditService.clearMemoryLogs();
+    await SessionStateService.clearAllSessions();
+    MerchantService.resetMockProducts();
+    InMemoryOrderStore.clear();
+
+    // 2. Clean existing records (Safely wrapped in try-catch to avoid crashing if DB offline)
     try {
       await prisma.cartItem.deleteMany({});
       await prisma.cart.deleteMany({});
@@ -184,8 +193,6 @@ export async function POST() {
       await prisma.product.deleteMany({});
       await prisma.merchant.deleteMany({});
       await prisma.auditLog.deleteMany({});
-      await SessionStateService.clearAllSessions();
-      AuditService.clearMemoryLogs();
 
       // Seed Merchants
       for (const m of SEED_MERCHANTS) {
@@ -198,30 +205,33 @@ export async function POST() {
       }
 
       // Seeding Default User Policy
+      const defaultPolicy = {
+        maxBudget: 2000.0,
+        allowedCategories: ["shoes", "clothing"],
+        allowedMerchants: ["QuickStep Sports", "UrbanStride"],
+        allowedPaymentMethods: ["UPI"],
+        autonomyLevel: 2,
+      };
+      PolicyEngine.setPolicyMemory(defaultPolicy);
       await prisma.userPolicy.upsert({
         where: { id: "default-policy" },
-        update: {
-          maxBudget: 2000.0,
-          allowedCategories: ["shoes", "clothing"],
-          allowedMerchants: ["QuickStep Sports", "UrbanStride"],
-          allowedPaymentMethods: ["UPI"],
-          autonomyLevel: 2,
-        },
+        update: defaultPolicy,
         create: {
           id: "default-policy",
-          maxBudget: 2000.0,
-          allowedCategories: ["shoes", "clothing"],
-          allowedMerchants: ["QuickStep Sports", "UrbanStride"],
-          allowedPaymentMethods: ["UPI"],
-          autonomyLevel: 2,
+          ...defaultPolicy,
         },
       });
 
       console.log("[Demo Reset] Database catalog and default policy restored successfully.");
     } catch (dbError) {
       console.warn("[Demo Reset] DB connection offline. Restoring mock in-memory states instead.", dbError);
-      AuditService.clearMemoryLogs();
-      await SessionStateService.clearAllSessions();
+      PolicyEngine.setPolicyMemory({
+        maxBudget: 2000.0,
+        allowedCategories: ["shoes", "clothing"],
+        allowedMerchants: ["QuickStep Sports", "UrbanStride"],
+        allowedPaymentMethods: ["UPI"],
+        autonomyLevel: 2,
+      });
     }
 
     return NextResponse.json({

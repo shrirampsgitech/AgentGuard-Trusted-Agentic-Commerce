@@ -42,7 +42,33 @@ export interface PolicyValidationResult {
   checks: CheckResult[];
 }
 
+const globalForPolicy = globalThis as unknown as {
+  memoryPolicy: UserPolicyData | undefined;
+};
+
 export class PolicyEngine {
+  private static getMemoryPolicy(): UserPolicyData {
+    if (!globalForPolicy.memoryPolicy) {
+      globalForPolicy.memoryPolicy = {
+        id: "default-policy",
+        maxBudget: 2000,
+        allowedCategories: ["shoes", "clothing"],
+        allowedMerchants: ["QuickStep Sports", "UrbanStride"],
+        allowedPaymentMethods: ["UPI"],
+        autonomyLevel: 2,
+      };
+    }
+    return globalForPolicy.memoryPolicy;
+  }
+
+  public static getPolicyMemory(): UserPolicyData {
+    return this.getMemoryPolicy();
+  }
+
+  public static setPolicyMemory(policy: Partial<UserPolicyData>) {
+    globalForPolicy.memoryPolicy = { ...this.getMemoryPolicy(), ...policy };
+  }
+
   /**
    * Deterministically validate a pending checkout context against a UserPolicy.
    */

@@ -64,7 +64,7 @@ export class PaymentService {
         amount: amountInPaise,
         currency: input.currency,
         receipt: input.receipt,
-        payment_capture: 1, // Auto-capture payments
+        payment_capture: true, // Auto-capture payments (boolean required by Razorpay SDK v2.9.x)
       });
 
       return {

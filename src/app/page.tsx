@@ -80,6 +80,11 @@ export default function Home() {
   // Refs
   const chatEndRef = useRef<HTMLDivElement>(null);
   const sandboxRef = useRef<HTMLDivElement>(null);
+  // Tracks whether the Razorpay success handler already fired for the current payment.
+  // ondismiss fires on ALL modal closes (including after success), so we must guard it.
+  const razorpayHandlerFired = useRef<boolean>(false);
+  // Tracks whether checkout.js has finished loading.
+  const razorpayScriptLoaded = useRef<boolean>(false);
 
   // Persistence helper for policy adjustments
   const savePolicyToBackend = async (
@@ -171,6 +176,9 @@ export default function Home() {
     const script = document.createElement("script");
     script.src = "https://checkout.razorpay.com/v1/checkout.js";
     script.async = true;
+    script.onload = () => {
+      razorpayScriptLoaded.current = true;
+    };
     document.body.appendChild(script);
 
     setMessages([
@@ -440,8 +448,19 @@ export default function Home() {
       setActiveRazorpayOrderId(data.razorpayOrderId);
       logger("ORDER_CREATED", `Internal order ID ${data.orderId} matches Razorpay ${data.razorpayOrderId}`, "success");
 
-      // Auto-trigger Razorpay sandbox modal
-      if ((window as any).Razorpay) {
+      // Auto-trigger Razorpay sandbox modal (only when real test keys are configured AND script is loaded)
+      const isRealRazorpayReady =
+        razorpayScriptLoaded.current &&
+        (window as any).Razorpay &&
+        data.keyId !== "rzp_test_placeholder";
+
+      if (isRealRazorpayReady) {
+        // Reset the handler-fired guard before each new payment attempt.
+        // This is critical: ondismiss fires on ALL modal closes (including after a successful
+        // payment). Without this guard, ondismiss would overwrite the "captured" state set
+        // by the success handler and incorrectly show the payment as "failed".
+        razorpayHandlerFired.current = false;
+
         const options = {
           key: data.keyId,
           amount: data.amount,
@@ -449,7 +468,17 @@ export default function Home() {
           name: "AgentGuard Sandbox",
           description: `Payment for ${product.name}`,
           order_id: data.razorpayOrderId,
+          prefill: {
+            // Test-safe placeholder values — Razorpay test mode works best with prefill populated.
+            name: "Test Buyer",
+            email: "test@agentguard.dev",
+            contact: "9999999999",
+          },
           handler: async function (response: any) {
+            // Mark that the success handler has fired BEFORE calling verify,
+            // so ondismiss (which also fires when modal closes post-payment) does not
+            // incorrectly override the result with "failed".
+            razorpayHandlerFired.current = true;
             await verifyPaymentSignatureOnBackend(
               data.orderId,
               data.razorpayOrderId,
@@ -458,17 +487,24 @@ export default function Home() {
             );
           },
           modal: {
+            // Disable Esc-key dismissal to prevent accidental closes mid-payment.
+            escape: false,
             ondismiss: function () {
-              logger("PAYMENT_CANCELLED", "User cancelled sandbox checkout frame.", "warning");
-              setPaymentStep("failed");
-            }
+              // Only mark as failed if the success handler did NOT already run.
+              // If handler ran, the payment is complete (captured or being verified) —
+              // do not override that state.
+              if (!razorpayHandlerFired.current) {
+                logger("PAYMENT_CANCELLED", "User cancelled or payment was rejected in Razorpay checkout.", "warning");
+                setPaymentStep("failed");
+              }
+            },
           },
           theme: { color: "#4f46e5" }
         };
         const rzp = new (window as any).Razorpay(options);
         rzp.open();
       } else {
-        // Fallback for mock sandbox panel
+        // Fallback for mock sandbox panel (placeholder keys OR script not yet loaded)
         logger("AWAITING_SANDBOX_ACTION", "Please authorize/fail transaction manually in sandbox controller.", "warning");
         setMessages((prev) => [
           ...prev,

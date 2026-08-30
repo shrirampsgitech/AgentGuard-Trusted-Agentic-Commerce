@@ -35,6 +35,10 @@ export interface MerchantData {
   active: boolean;
 }
 
+const globalForCatalog = globalThis as unknown as {
+  mockProducts: ProductData[] | undefined;
+};
+
 export class MerchantService {
   // In-Memory replica catalog (same data as seeded database, for resilient fallback)
   private static mockMerchants: MerchantData[] = [
@@ -64,7 +68,7 @@ export class MerchantService {
     },
   ];
 
-  private static mockProducts: ProductData[] = [
+  private static initialMockProducts: ProductData[] = [
     {
       id: "prod-exact-match",
       merchantId: "merch-quickstep",
@@ -211,6 +215,13 @@ export class MerchantService {
     },
   ];
 
+  private static getMockProducts(): ProductData[] {
+    if (!globalForCatalog.mockProducts) {
+      globalForCatalog.mockProducts = JSON.parse(JSON.stringify(this.initialMockProducts));
+    }
+    return globalForCatalog.mockProducts!;
+  }
+
   /**
    * Helper to check database connectivity.
    */
@@ -227,6 +238,10 @@ export class MerchantService {
     } catch {
       return false;
     }
+  }
+
+  public static getMockProductById(id: string): ProductData | null {
+    return this.getMockProducts().find((p) => p.id === id) ?? null;
   }
 
   /**
@@ -348,7 +363,7 @@ export class MerchantService {
     }
 
     // Local in-memory search fallback
-    return this.mockProducts.filter((p) => {
+    return this.getMockProducts().filter((p) => {
       if (activeOnly && !p.active) return false;
       if (filters?.merchantId && p.merchantId !== filters.merchantId) return false;
       if (filters?.category && p.category.toLowerCase() !== filters.category.toLowerCase()) return false;
@@ -394,7 +409,27 @@ export class MerchantService {
         console.warn("[MerchantService] Single product query failed. Falling back.", error);
       }
     }
-    return this.mockProducts.find((p) => p.id === id && p.active) || null;
+    return this.getMockProducts().find((p) => p.id === id && p.active) || null;
+  }
+
+  public static decrementMockStock(id: string, quantity: number): void {
+    const products = this.getMockProducts();
+    const product = products.find((p) => p.id === id);
+    if (product) {
+      product.stock = Math.max(0, product.stock - quantity);
+    }
+  }
+
+  public static setMockStock(id: string, stock: number): void {
+    const products = this.getMockProducts();
+    const product = products.find((p) => p.id === id);
+    if (product) {
+      product.stock = stock;
+    }
+  }
+
+  public static resetMockProducts(): void {
+    globalForCatalog.mockProducts = undefined;
   }
 
   /**

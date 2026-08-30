@@ -3,6 +3,7 @@ import { BuyerAgentService } from "../../../services/buyerAgent";
 import { SessionStateService } from "../../../services/sessionStateService";
 import { prisma } from "../../../lib/prisma";
 import { AuditService } from "../../../services/auditService";
+import { PolicyEngine } from "../../../services/policyEngine";
 
 export const dynamic = "force-dynamic";
 
@@ -14,8 +15,9 @@ export async function POST(request: NextRequest) {
     const activeSessionId = sessionId || `session_${Math.random().toString(36).substring(2, 12)}`;
 
     // Safe query to load User Policy
-    let policyAutonomy = clientAutonomy !== undefined ? clientAutonomy : 2; // Default: 'Prepare' (Lvl 2)
-    let policyLimit = clientLimit !== undefined ? clientLimit : 2000;  // Default: ₹2,000 budget cap
+    const defaultPolicy = PolicyEngine.getPolicyMemory();
+    let policyAutonomy = clientAutonomy !== undefined ? clientAutonomy : defaultPolicy.autonomyLevel;
+    let policyLimit = clientLimit !== undefined ? clientLimit : defaultPolicy.maxBudget;
 
     try {
       const policy = await prisma.userPolicy.findUnique({
@@ -26,7 +28,10 @@ export async function POST(request: NextRequest) {
         policyLimit = policy.maxBudget;
       }
     } catch {
-      // Safe fallback if database connection is offline
+      // Safe fallback if database connection is offline: use memory cache values
+      const fallbackPolicy = PolicyEngine.getPolicyMemory();
+      policyAutonomy = fallbackPolicy.autonomyLevel;
+      policyLimit = fallbackPolicy.maxBudget;
     }
 
     // Load persistent session state if it exists

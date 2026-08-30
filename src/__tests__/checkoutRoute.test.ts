@@ -266,4 +266,29 @@ describe("Checkout API Route Tests", () => {
     const body = await response.json();
     expect(body.error).toContain("Stale staged-product state or mismatched product ID");
   });
+
+  it("should gracefully fall back to in-memory store if database query fails but offline is not forced", async () => {
+    process.env.FORCE_DB_AVAILABLE = ""; // not forced false
+    
+    // Simulate database queries throwing errors
+    (prisma.product.findUnique as any).mockRejectedValue(new Error("Connection refused"));
+    (prisma.userPolicy.findUnique as any).mockRejectedValue(new Error("Connection refused"));
+
+    const req = new NextRequest("http://localhost:3000/api/checkout", {
+      method: "POST",
+      body: JSON.stringify({
+        sessionId: "test-session-route",
+        productId: "prod-exact-match",
+        size: 9,
+        originalPrice: 1899,
+        authorizationStatus: "USER_CONFIRMED",
+      }),
+    });
+
+    const response = await POST(req);
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.orderId).toContain("mem_order_");
+    expect(body.razorpayOrderId).toBeDefined();
+  });
 });
